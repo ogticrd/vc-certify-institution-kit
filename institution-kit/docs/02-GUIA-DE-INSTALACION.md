@@ -372,7 +372,7 @@ Si no existe `.env`, el script lo crea desde `.env.example` y se detiene para qu
 | 3. Generación de la configuración | Escribe en `generated/` (carpeta privada, permisos 700): primero el contexto propio y su huella (si ya hay uno publicado con otro contenido, se detiene: sección 5); después `.env.runtime` (permisos 600: las contraseñas y el secreto OAuth), `compose-args` (la orden de `docker compose` de su modo), el logo, la configuración de Certify (sin secretos), el `Caddyfile`, el SQL de la credencial y la credencial de muestra. | Mensaje de error del generador (por ejemplo un nombre de atributo no válido o «contexto nuevo = clave nueva»). |
 | 3b. Base de datos de una instalación anterior | Si hay un contenedor de la base cuyos datos están en un volumen anónimo (kit anterior), se detiene y explica cómo migrarlo (sección 12). | Siga los pasos de la sección 12. |
 | 4. Construcción | `docker compose build`: construye la imagen de Certify desde el repositorio. **La primera vez tarda varios minutos; no la cancele.** | Revise el error de la construcción (acceso a internet, memoria). |
-| 5. Arranque | `docker compose up -d`: levanta base de datos, Certify y Caddy, que arrancan solos tras un reinicio del servidor (`restart: unless-stopped`). Caddy espera a que Certify esté **sano** (tiene un chequeo de salud interno; el primer arranque tarda un par de minutos). La base crea el esquema y carga la credencial solo en su primer arranque. | Si un servicio no llega a estar sano, el script lo dice: `docker compose … ps` y `… logs certify`. |
+| 5. Arranque | `docker compose up -d`: levanta base de datos, Certify y Caddy, que arrancan solos tras un reinicio del servidor (`restart: unless-stopped`). Caddy espera a que Certify esté **sano** (tiene un chequeo de salud interno; el primer arranque tardó unos 10 segundos en la prueba de integración, en un portátil, y el kit espera hasta un par de minutos). La base crea el esquema y carga la credencial solo en su primer arranque. | Si un servicio no llega a estar sano, el script lo dice: `docker compose … ps` y `… logs certify`. |
 | 6. Mensajes del modo | En `domain` e `ip` muestra los registros de Caddy durante 30 segundos (la obtención del certificado). En `proxy` indica el puerto y recuerda configurar el proxy. | — |
 | 7. Espera de Certify | Pregunta el estado de salud por la red interna cada 5 segundos, hasta 60 veces (5 minutos). | `ERROR: Certify no respondió UP tras 300s`: revise `docker compose … logs certify`. |
 | 8. Corrección del DID | Ejecuta `scripts/generate-did.sh` (sección 4.6). | Mensaje de error: ¿está Certify en pie? |
@@ -562,7 +562,7 @@ El script valida el `.env`, regenera la configuración (incluidos logo, contexto
 
 Variantes: `NO_REGENERAR=1 ./scripts/apply-credential.sh` aplica el SQL que ya está generado sin regenerar nada; `DRY_RUN=1 ./scripts/apply-credential.sh` regenera los ficheros (sin tocar `generated/contextos/`) y solo imprime las órdenes de `psql` y de reinicio.
 
-3. **Certify se reinicia solo**: al terminar de aplicar el SQL, el script ejecuta `docker compose … restart certify` (solo Certify; ni la base ni Caddy). Certify guarda en memoria la configuración de la credencial (hasta una hora, según su configuración) y, sin reiniciar, seguiría emitiendo con la anterior. Si el SQL falla, **no** reinicia. Espere a que vuelva a estar `UP` (un par de minutos).
+3. **Certify se reinicia solo**: al terminar de aplicar el SQL, el script ejecuta `docker compose … restart certify` (solo Certify; ni la base ni Caddy). Certify guarda en memoria la configuración de la credencial (hasta una hora, según su configuración) y, sin reiniciar, seguiría emitiendo con la anterior. Si el SQL falla, **no** reinicia. Espere a que vuelva a estar `UP` (unos segundos; hasta un par de minutos en un servidor lento).
 
 4. Repita la verificación: `./scripts/verify-install.sh`.
 
@@ -656,7 +656,9 @@ Por eso la guía anterior que pedía `curl https://<su dirección>/v1/certify/ac
 
 ### Registros (logs)
 
-El kit configura Certify para que **no escriba en los registros el token de acceso de la persona ni sus datos** (hay una versión del proyecto base que sí lo hacía). Qué hace y qué no, y qué debe hacer si construyó Certify desde una versión anterior, está en [IUGO-CUSTOMIZATIONS.md](./IUGO-CUSTOMIZATIONS.md).
+El kit evita que Certify escriba en los registros el **token de acceso** de la persona (hay una versión del proyecto base que sí lo hacía): con Certify real y un token válido, el registro no lo contiene. Qué hace y qué no, y qué debe hacer si construyó Certify desde una versión anterior, está en [IUGO-CUSTOMIZATIONS.md](./IUGO-CUSTOMIZATIONS.md).
+
+**Lo que el kit NO puede evitar: los datos de la persona.** El plugin de la API de datos (`RestApiDataProviderPlugin`, un `.jar` ya compilado que viene con el repositorio) escribe por la salida estándar, **en cada emisión**, las claims del token (`sub`, `ext.username`, que es la cédula), la cédula, la URL que consulta y **la respuesta completa de su API, es decir, todos los atributos de la credencial**. Son líneas sin nivel de registro (`identityDetails: …`, `DataProviderRepositoryImpl: …`): no se apagan con configuración. Corregirlo exige cambiar el código del plugin, cuyo fuente no está en este repositorio (decisión de OGTIC e IUGO). Mientras tanto, trate los registros de Certify como dato personal: acceso solo para administradores, no los envíe a un sistema de registros compartido sin filtrar y limite cuánto se conservan (configure la rotación del *driver* de registros de Docker; `docker compose … up -d --force-recreate certify` descarta los del contenedor anterior).
 
 ---
 
@@ -716,7 +718,15 @@ Regenera la configuración, reconstruye lo que haga falta, reinicia lo que cambi
 2. Respalde (arriba).
 3. Traiga la versión nueva (`git pull` de la rama que le indique OGTIC). Si modificó algún fichero del kit (por ejemplo `docker-compose.proxy.yml` para escuchar solo en `127.0.0.1`), `git` le avisará de conflictos: repita su cambio.
 4. Si su instalación es de una versión **anterior al volumen con nombre de PostgreSQL**, `install.sh` se detendrá pidiendo la migración (arriba). Si usa las contraseñas por defecto, también se detendrá pidiendo rotarlas (sección 11). Compare su `.env` con el `.env.example` nuevo para ver si hay variables nuevas (`diff .env.example .env` muestra las diferencias; los valores propios de su institución aparecerán como diferentes, es lo esperado). Una variable nueva obligatoria hace que el kit se detenga con un mensaje que la nombra.
-5. Ejecute `./install.sh`.
+5. **Si su base de datos se creó con una versión anterior del kit**, corrija el nombre de una columna (el esquema solo se carga en el primer arranque de PostgreSQL, así que actualizar el kit no lo cambia). Certify 0.13 en adelante lee `status_list_credential.capacity_in_kb` y el kit anterior creaba `capacity`; sin el cambio, emitir falla al crear la lista de estado:
+
+   ```bash
+   printf "ALTER TABLE certify.status_list_credential RENAME COLUMN capacity TO capacity_in_kb;\n" \
+     | docker compose $(cat generated/compose-args) exec -T database psql -U postgres -d inji_certify
+   ```
+
+   (Si la columna ya se llama `capacity_in_kb`, PostgreSQL responde que `capacity` no existe: no hay nada que hacer. Con su `POSTGRES_USER` y `POSTGRES_DB` si los cambió.)
+6. Ejecute `./install.sh`.
 
 ### Reinstalar desde cero (solo en una instalación de pruebas)
 
@@ -765,7 +775,8 @@ El motor que usa `verify-install.sh` está en `institution-kit/diagnostico/` y *
 | Certify no conecta con la base de datos | Probablemente las contraseñas no coinciden con las de la base ya creada. Sección 11. |
 | El estado de salud responde JSON con `Full authentication is required` | Regenere la configuración y recree Certify: `./scripts/generate-config.sh` y `docker compose $(cat generated/compose-args) up -d --force-recreate certify`. Debe devolver `{"status":"UP"}`. |
 | Modo dominio o IP: no obtiene el certificado HTTPS | Confirme el puerto 80 abierto desde internet. En modo dominio, que el DNS apunte al servidor; en modo IP, que `sslip.io` resuelva a la IP pública. Si Caddy quedó con un certificado interno, limpie solo su volumen como se indica en la sección 12. Justo tras instalar, la comprobación 1 puede fallar un minuto mientras se emite el certificado: repita `./scripts/verify-install.sh`. |
-| Un servicio no llega a estar sano al hacer `up -d` | `docker compose $(cat generated/compose-args) ps` y `… logs certify`. Certify tarda un par de minutos en su primer arranque. |
+| La emisión responde `400` con `ERROR_SIGNING_QR_DATA` / «Error occurred during canonicalization» | Certify no pudo descargar un `@context` al firmar. `docker compose $(cat generated/compose-args) logs certify \| grep "remote context"` dice cuál: `www.w3.org` o `w3id.org` (salida 443 bloqueada) o su propio `…/contextos/<clave>.json` (el contenedor no alcanza su dirección pública). Véanse los prerrequisitos, sección 1.5. |
+| Un servicio no llega a estar sano al hacer `up -d` | `docker compose $(cat generated/compose-args) ps` y `… logs certify`. Certify tarda unos segundos (hasta un par de minutos en un servidor lento) en su primer arranque. |
 | Modo IP: la URL no responde desde internet | Confirme que los puertos 80 y 443 de la IP pública llegan al servidor. |
 | Modo proxy: `Bind for 0.0.0.0:8080 failed: port is already allocated` | Otro programa usa ese puerto: cambie `CADDY_HTTP_PORT` en el `.env` y repita `./install.sh`; actualice el proxy al puerto nuevo. |
 | Modo proxy: el estado de salud se ve desde internet | Su proxy no envía `X-Forwarded-For` con la IP real. Configúrelo (sección 3C). |

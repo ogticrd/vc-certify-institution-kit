@@ -14,7 +14,7 @@ El kit configura Certify con tres validaciones **relajadas** y con un nivel de r
 |---|---|---|---|
 | `mosip.certify.authn.validate-audience` | `false` | `false` | El `aud` del token debe estar en `mosip.certify.authn.allowed-audiences` |
 | `mosip.certify.authn.require-client-id-claim` | `false` | `false` | El token debe traer la claim `client_id` |
-| `mosip.certify.issuance.validate-cnonce` | `false` | `false` | Se valida el `c_nonce` y el nonce del *proof* JWT |
+| `mosip.certify.issuance.validate-cnonce` | `false` | `false` | Se valida el `c_nonce`, el nonce **y la firma** del *proof* JWT (posesión de la clave del titular) |
 
 El emisor que OGTIC opera en producción **no fija ninguna de las tres**: corre con el valor por defecto del código, que es `false`. El kit las escribe de forma explícita para que sea visible, pero el comportamiento es el mismo.
 
@@ -42,11 +42,11 @@ Lo que **sí** se valida siempre, con estas tres en `false`: la firma del token 
 
 ## `validate-cnonce=false`
 
-**Qué relaja.** Con `false`, `VCIssuanceServiceImpl` y `CertifyIssuanceServiceImpl` saltan la validación del `c_nonce` y del nonce del *proof* JWT, y escriben en cada petición el aviso `Skipping cNonce and proof nonce validation`. La firma del *proof* (posesión de la clave del titular) **sigue** comprobándose; lo que no se comprueba es que sea reciente y de un solo uso.
+**Qué relaja.** Con `false`, `VCIssuanceServiceImpl` y `CertifyIssuanceServiceImpl` saltan la validación del `c_nonce` y del nonce del *proof* JWT, y escriben en cada petición el aviso `Skipping cNonce and proof nonce validation`. **Con `false` el *proof* no se valida en absoluto, tampoco su firma**: en `CertifyIssuanceServiceImpl` la llamada a `proofValidator.validate(...)` está dentro del `if (validateCNonce)`. Esto se midió en la prueba de integración con Certify real (4-oct-2026): un *proof* con la firma rellena de basura y sin nonce se aceptó y la credencial salió atada al `did:jwk` de ese *proof*. (Una versión anterior de este documento decía que la firma del *proof* seguía comprobándose: era un error.)
 
 **Por qué.** El fork documenta que el `c_nonce` y el nonce del *proof* no cuadraban con OpenID4VCI en el flujo de la cartera, y `getValidClientNonce` rechazaba la petición.
 
-**Riesgo.** Reutilización de pruebas de posesión: quien capture un *proof* y tenga un token válido puede pedir otra credencial atada a la misma clave. Necesita un token del propio ciudadano, así que el riesgo es bajo, pero no hay protección contra repetición.
+**Riesgo.** Certify no comprueba que quien pide la credencial posea la clave a la que se ata: con un token válido se puede pedir una credencial atada a **cualquier** `did:jwk` (la clave de otra persona, por ejemplo), y tampoco hay protección contra repetición. Necesita un token del propio ciudadano, así que el riesgo de abuso externo es bajo, pero la propiedad «la credencial está atada a la clave de su titular» no se cumple mientras esté en `false`. Riesgo medio.
 
 **Cómo endurecerla.** Es la que más pruebas necesita (depende de la cartera y de Mimoto): activarla en un entorno de prueba y emitir con la cartera real antes de tocar producción.
 
@@ -63,5 +63,7 @@ docker compose $(cat generated/compose-args) logs certify | grep -c "Raw access 
 ```
 
 Si da un número mayor que cero, los registros ya contienen tokens (de una versión anterior, o de una configuración de registro cambiada).
+
+**Lo que el filtro no cubre: el plugin de la API de datos.** Medido con Certify real y un token JWT válido: con la configuración del kit, el registro no contiene el token (ni «Raw access token» ni las claims decodificadas). Pero el plugin `restapi-dataprovider-plugin-0.3.0.jar` (precompilado; su fuente no está en este repositorio) imprime por la salida estándar, en cada emisión, `identityDetails: {ext={username=<cédula>}, sub=…}`, `DataProviderRepositoryImpl: Attempting to fetch data for ID: <cédula>`, `Target API URL: …/<cédula>` y `Target API Response Body: {…todos los atributos…}`. No usa el sistema de registro, así que ningún nivel ni XML lo apaga. Es el mismo incidente de datos personales por otra vía; su corrección es una decisión sobre el código del plugin (OGTIC/IUGO).
 
 **Qué NO hace.** No borra las líneas del fuente de Java: eso es una corrección del código del fork (revertir `541f1d9`), decisión que toman OGTIC e IUGO. Mientras esas líneas existan, un cambio de nivel o de configuración las vuelve a activar. Los servidores que ya construyeron Certify desde esa rama pueden tener tokens en sus registros: revíselos, purgue los que los contengan y revise quién tiene acceso a ellos.

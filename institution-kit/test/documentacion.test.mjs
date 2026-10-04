@@ -49,8 +49,18 @@ describe("lo que la subsanación retiró no queda como vigente", () => {
     assert.match(GUIA, /pgdata/);
     assert.match(GUIA, /rotarlas a mano/);
   });
-  test("el CHANGELOG cita lo que no se pudo probar", () => {
-    assert.match(CHANGELOG, /no ha podido ejecutarse con Docker, Caddy ni Certify reales/);
+  test("el CHANGELOG cita lo que se probó con el sistema real (T9) y lo que no", () => {
+    // Antes de T9 decía «no ha podido ejecutarse con Docker, Caddy ni Certify reales»; ya se ejecutó una vez.
+    assert.doesNotMatch(CHANGELOG, /no ha podido ejecutarse con Docker, Caddy ni Certify reales/);
+    assert.match(CHANGELOG, /Probado con Docker, Caddy y Certify reales \*\*una vez\*\*/);
+    assert.match(CHANGELOG, /No probado: una emisión con la billetera real/);
+  });
+  test("el CHANGELOG y la guía no dan por resuelto lo que la integración demostró abierto (registros de datos, proof, vigencia, revocación)", () => {
+    assert.match(CHANGELOG, /Los datos de la persona siguen apareciendo en los registros de Certify/);
+    assert.match(CHANGELOG, /no valida el \*proof\* del titular, ni su firma/);
+    assert.match(CHANGELOG, /vc-expiry-duration/);
+    assert.match(CHANGELOG, /POST \/v1\/certify\/credentials\/status/);
+    assert.match(GUIA, /Lo que el kit NO puede evitar: los datos de la persona/);
   });
 });
 

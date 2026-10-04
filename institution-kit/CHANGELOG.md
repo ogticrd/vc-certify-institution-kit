@@ -22,7 +22,11 @@ Cambios de la rama `fix/kit-firma-y-contexto` respecto al kit anterior (`dr-impl
 - Las líneas del código Java que escriben el token siguen en el fuente del proyecto base; el kit solo lo evita por configuración. Revertir el commit `541f1d9` es una decisión aparte.
 - Las tres validaciones relajadas del token (audiencia, `client_id`, `c_nonce`) siguen como estaban: [`docs/IUGO-CUSTOMIZATIONS.md`](docs/IUGO-CUSTOMIZATIONS.md).
 - Las contraseñas y el secreto OAuth llegan a Certify como variables de entorno del contenedor: son visibles para quien pueda ejecutar `docker inspect` (los usuarios con acceso a Docker, que en la práctica son administradores). Limite quién tiene acceso a Docker en el servidor.
-- El kit no ha podido ejecutarse con Docker, Caddy ni Certify reales en esta rama (pendiente de la prueba de integración): la sintaxis del Caddyfile la valida el CI con el Caddy real; el comportamiento de Certify (marcadores `${KIT_*}`, plantilla con `$_esc.java`, rutas abiertas o cerradas) se razonó sobre su código fuente y se probó con Velocity real, pero no con Certify en marcha.
+- **Los datos de la persona siguen apareciendo en los registros de Certify.** El plugin de la API de datos (`restapi-dataprovider-plugin-0.3.0.jar`, precompilado) imprime por la salida estándar, en cada emisión, la cédula, las claims del token y la respuesta completa de la API (todos los atributos). El kit evita el token (medido: 0 apariciones), pero esas líneas no se apagan con configuración: hay que cambiar el plugin (decisión de OGTIC/IUGO). Detalle en la guía, sección 11, y en `docs/IUGO-CUSTOMIZATIONS.md`.
+- **Con `validate-cnonce=false` Certify no valida el *proof* del titular, ni su firma** (corrige lo que decía `docs/IUGO-CUSTOMIZATIONS.md`): un *proof* con firma basura se aceptó. Medido con Certify real.
+- **La vigencia de la credencial no la fija el kit.** `validUntil` lo calcula Certify como «ahora + `mosip.certify.data-provider-plugin.vc-expiry-duration`» (por defecto `P730D`, dos años) y sobrescribe cualquier otro valor; el kit no define esa propiedad. El emisor de OGTIC usa `P365D`. Es una decisión pendiente.
+- **Revocación.** Certify inyecta `credentialStatus` (lista de bits `BitstringStatusListEntry`) en cada credencial aunque la plantilla no lo tenga, y publica la lista en `…/v1/certify/credentials/status-list/<id>`, que Caddy deja pasar. Pero el endpoint para revocar (`POST /v1/certify/credentials/status`) está cerrado a internet a propósito: hoy la institución no tiene un procedimiento documentado para revocar. Pendiente.
+- Probado con Docker, Caddy y Certify reales **una vez**, en un portátil, con un emisor de autorización y una API de datos simulados (nunca contra Cuenta Única ni contra una API real): instalación, verificación 11/11, emisión de una credencial firmada y su verificación. No probado: una emisión con la billetera real, los pasos de migración de PostgreSQL y de rotación del almacén de llaves.
 
 ### Cambiado
 
@@ -45,6 +49,13 @@ Cambios de la rama `fix/kit-firma-y-contexto` respecto al kit anterior (`dr-impl
 - **CI.** `.github/workflows/kit.yml` ejecuta la suite en Node 22 (con Velocity real) y valida con `caddy validate` el Caddyfile de los tres modos.
 - **Documentación.** Nuevos `README.md` del kit y este `CHANGELOG.md`; reescritos `docs/01-PREREQUISITOS.md` y `docs/02-GUIA-DE-INSTALACION.md`; revisado `docs/IUGO-CUSTOMIZATIONS.md`.
 
+### Corregido tras la prueba de integración con Certify real
+
+- **Esquema de la base alineado con Certify 0.14.** `sql/00-schema.sql` creaba `status_list_credential.capacity`; Certify lee `capacity_in_kb`. Sin el cambio, **ninguna emisión** funcionaba (se consulta esa tabla al emitir para añadir `credentialStatus`). Una base ya creada necesita `ALTER TABLE certify.status_list_credential RENAME COLUMN capacity TO capacity_in_kb;` (guía, sección 12).
+- **Caddy ya no sale `unhealthy`.** El chequeo de salud usaba `localhost`, que `wget` (busybox) resuelve primero a IPv6, y Caddy solo escucha en IPv4: ahora usa `127.0.0.1`.
+- **El `id` de la credencial** cuelga de la dirección pública de la institución (`https://<su dirección>/credential/<uuid>`), no de `https://mosip.io/credential/`.
+- **Documentación.** Prerrequisitos: Certify necesita salida 443 a `www.w3.org` y `w3id.org` y poder alcanzar su propia dirección pública **al firmar** (sin ellos, `400 ERROR_SIGNING_QR_DATA`). Registros y *proof*: ver «Lo que esta versión no resuelve».
+
 ### Para instituciones ya instaladas
 
 **No ejecute `./install.sh` de esta versión sobre una instalación hecha con el kit anterior sin leer esto.** La migración detallada (qué hacer con la credencial emitida, cómo comunicarlo a las personas) es una tarea aparte que publicará OGTIC; mientras tanto, lo siguiente es lo que debe saber y lo único que se recomienda hacer.
@@ -55,7 +66,8 @@ Cambios de la rama `fix/kit-firma-y-contexto` respecto al kit anterior (`dr-impl
 2. **Se detendrá por las contraseñas, a propósito.** Si su instalación usa `postgres` y `local` (lo normal con el kit anterior), el kit nuevo **no genera contraseñas nuevas** sobre una base y un almacén de llaves ya creados (no coincidirían y Certify dejaría de arrancar): se detiene y explica cómo **rotarlas a mano**, o bien fije en `POSTGRES_PASSWORD` y `KEYSTORE_PASSWORD` las que ya tienen. `KIT_CONSERVAR_SECRETOS_POR_DEFECTO` **ya no existe** (se ignora con un aviso): dejar `postgres` y `local` sin rotar no es una opción. Detalle: guía, sección 11.
    **Se detendrá también por la base de datos.** El kit anterior guardaba los datos de PostgreSQL en un volumen anónimo; este usa uno con nombre (`pgdata`). Actualizar sin migrar crearía una base nueva y vacía y dejaría huérfana la vieja: `install.sh` lo detecta y se detiene con los cinco pasos de la migración (guía, sección 12). Haga primero la copia de seguridad.
 3. **La credencial.** Su configuración actual guarda un `@context` que no cubre sus datos y un identificador aleatorio. Con la **misma** `CREDENTIAL_CONFIG_KEY_ID`, el kit la sobrescribiría en su sitio; con una clave **nueva**, crearía otra configuración y dejaría la vieja activa. Cuál conviene (lo recomendable es una clave nueva y que las personas pidan de nuevo su credencial) lo fijará el procedimiento de migración.
-4. **Cambian los comandos.** Los `docker compose` del kit llevan ahora la configuración de `generated/compose-args`, y el estado de salud ya no se consulta desde internet.
+4. **Su base de datos probablemente tiene la columna `capacity`**, que Certify 0.13 en adelante no lee: antes de emitir con esta versión, aplique el `ALTER TABLE … RENAME COLUMN capacity TO capacity_in_kb` de la guía, sección 12.
+5. **Cambian los comandos.** Los `docker compose` del kit llevan ahora la configuración de `generated/compose-args`, y el estado de salud ya no se consulta desde internet.
 
 **Qué puede hacer hoy sin riesgo**
 

@@ -65,7 +65,7 @@ El HTTPS lo pone el proxy de la institución, no el kit. Caddy escucha solo HTTP
 - **`CERTIFY_PUBLIC_URL`**, obligatoria: la dirección pública que sirve su proxy, con la forma `https://certify.institucion.gob.do` (sin ruta y sin barra final). En los otros dos modos el kit la calcula solo; en este no puede, porque el nombre público lo decide el proxy.
 - Que el proxy **reenvíe a `http://<este servidor>:<CADDY_HTTP_PORT>`** (8080 por defecto).
 - Que el proxy **envíe `X-Forwarded-For` con la IP real del cliente**. De eso depende que el estado de salud interno de Certify no quede visible desde internet (detalle en la guía, sección 3C).
-- Que el servidor pueda **alcanzar su propia dirección pública** (la verificación final se hace desde el servidor contra esa URL).
+- Que el servidor pueda **alcanzar su propia dirección pública**: la verificación final se hace desde el servidor contra esa URL y, además, **Certify (el contenedor) la descarga al firmar una credencial** (su contexto propio, `/contextos/<clave>.json`; véase la tabla de puertos de salida). Sin esa salida y vuelta por su propio proxy, la emisión falla.
 
 ### 1.5 Puertos de red
 
@@ -79,6 +79,8 @@ Los puertos de entrada dependen del modo.
 | 443/tcp | salida | todos | servidor → `auth.cuentaunica.gob.do` | Descarga de las llaves públicas de Cuenta Única para validar el token de la persona. |
 | 443/tcp | salida | todos | servidor → `RESTAPI_TOKEN_URL` y `RESTAPI_BASE_URL` | Obtener el token de la API de datos y los datos de la persona. |
 | 443/tcp | salida | todos | servidor → registros de Docker y Maven | Descarga de imágenes y dependencias en la primera construcción. |
+| 443/tcp | salida | todos | contenedor de Certify → `www.w3.org` y `w3id.org` | Certify descarga los contextos JSON-LD estándar (`credentials/v2` y el de la suite Ed25519) al firmar. Si no llegan, emitir falla con `ERROR_SIGNING_QR_DATA` («Error occurred during canonicalization»). Comprobado bloqueando cada uno por separado. |
+| 443/tcp | salida | todos | contenedor de Certify → **su propia dirección pública** (`CERTIFY_PUBLIC_URL`) | Al firmar, Certify descarga también el contexto propio de la credencial por esa dirección. Si el contenedor no puede llegar a ella (DNS interno, cortafuegos que no permite salir y volver a entrar), mismo error. |
 
 **Sobre `CADDY_HTTP_PORT` (modo proxy).** Docker publica ese puerto en **todas las interfaces** del servidor, no solo en la que ve el proxy. Proteja el puerto de una de estas dos formas:
 

@@ -22,7 +22,7 @@ Además genera la configuración, corrige el documento público de identidad del
 
 1. Un servidor Linux x86_64 con 4 vCPU, 8 GB de RAM y 50 GB de disco, con Docker Engine 24 o superior y Docker Compose v2.
 2. Herramientas en el servidor: `git`, `curl`, `jq`, `openssl`, `iconv` (viene con Linux) y `envsubst` (paquete `gettext-base` en Debian y Ubuntu).
-3. Salida a internet desde el servidor (imágenes de Docker, dependencias Maven en la primera construcción y Cuenta Única).
+3. Salida a internet desde el servidor (imágenes de Docker, dependencias Maven en la primera construcción, Cuenta Única y, al emitir, `www.w3.org` y `w3id.org` para los contextos estándar); Certify también debe poder alcanzar su propia dirección pública.
 4. Una forma de ser alcanzable desde internet por HTTPS: un dominio propio, o solo una IP pública, o un proxy inverso de la institución que ya publica el servicio.
 5. Lo que entrega OGTIC (cliente de Cuenta Única **de producción**, URL del token de la API de datos, URL de la API) y un **logo PNG** de la institución.
 
