@@ -193,11 +193,12 @@ describe("línea base · casos límite del comportamiento actual", () => {
     } finally { e.limpiar(); }
   });
 
-  test("TLS_MODE=proxy se rechaza hoy (T5 lo admitirá)", () => {
-    const e = prepararEntorno({ modo: "proxy", runtime: false });
+  // T5: antes «TLS_MODE=proxy se rechaza hoy». El modo proxy tiene sus pruebas en modo-proxy.test.mjs.
+  test("un TLS_MODE desconocido se rechaza con los tres valores válidos (T5)", () => {
+    const e = prepararEntorno({ modo: "otro" });
     try {
       assert.notEqual(e.pasos.generar.status, 0);
-      assert.match(e.pasos.generar.stderr, /TLS_MODE debe ser 'domain' o 'ip' \(actual: proxy\)/);
+      assert.match(e.pasos.generar.stderr, /TLS_MODE debe ser 'domain', 'ip' o 'proxy' \(actual: otro\)/);
       assert.equal(e.existe("caddyfile"), false);
     } finally { e.limpiar(); }
   });

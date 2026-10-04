@@ -98,7 +98,10 @@ for (const modo of ["domain", "ip"]) {
 
     test("R9/D8: el actuator es 404, salvo health desde rangos privados", () => {
       const salud = bloque(c, "handle /v1/certify/actuator/health");
-      assert.match(salud, /@interno remote_ip private_ranges/);
+      // client_ip (T5): en domain e ip, sin proxies de confianza, es lo mismo que remote_ip; detrás de un
+      // proxy usa la IP real del cliente. Nunca remote_ip: ahí toda petición parece interna.
+      assert.match(salud, /@interno client_ip private_ranges/);
+      assert.doesNotMatch(salud, /remote_ip/);
       // Desde la red privada, proxy a Certify; desde cualquier otra, 404.
       assert.match(bloque(salud, "handle @interno"), /^\{\n\t\t\treverse_proxy certify:8090\n\t\t\}$/);
       assert.match(salud, /handle \{\n\t\t\trespond 404\n\t\t\}/);
@@ -109,7 +112,7 @@ for (const modo of ["domain", "ip"]) {
       const iGeneral = c.indexOf("handle /v1/certify/* {");
       assert.ok(iSalud < iComodin && iComodin < iGeneral);
       // El único matcher de IP es el de rangos privados.
-      assert.doesNotMatch(c, /remote_ip (?!private_ranges)/);
+      assert.doesNotMatch(c, /(client_ip|remote_ip) (?!private_ranges)/);
     });
 
     test("la metadata del emisor y el resto de /v1/certify/* siguen yendo a Certify", () => {

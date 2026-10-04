@@ -101,6 +101,22 @@ https://203-0-113-10.sslip.io
 
 (Los puntos de la IP se reemplazan por guiones.) Caddy pedirá un certificado público a Let's Encrypt para ese hostname; el puerto 80 debe estar abierto.
 
+### 3C. Modo proxy (detrás de un proxy inverso de la institución)
+
+Use este modo si ya hay un proxy inverso (nginx, F5, un balanceador) que publica el emisor en internet y termina el TLS. Caddy **no** pide certificados ni abre el 443: escucha solo HTTP.
+
+```bash
+TLS_MODE=proxy
+CERTIFY_PUBLIC_URL=https://certify.intrant.gob.do
+# CADDY_HTTP_PORT=8080
+# TRUSTED_PROXIES=private_ranges
+```
+
+- `CERTIFY_PUBLIC_URL` es **obligatoria**: `https://` + el dominio público que sirve su proxy, sin ruta ni barra final.
+- El servidor publica **solo** `CADDY_HTTP_PORT` (8080 por defecto, hacia el puerto 80 de Caddy). No se publica el 80 ni el 443 del servidor; `CADDY_ACME_EMAIL` no se usa. Ponga el puerto detrás del cortafuegos: solo su proxy debe alcanzarlo.
+- Su proxy debe reenviar a `http://<este servidor>:8080` y **enviar `X-Forwarded-For` con la IP real del cliente**. El kit solo cree en esa cabecera si la conexión viene de `TRUSTED_PROXIES` (por defecto las redes privadas; póngale la IP de su proxy si lo conoce). De eso depende que `health` del actuator no quede visible desde internet.
+- La orden exacta de `docker compose` de cada modo queda escrita en `generated/compose-args` (ficheros `docker-compose.tls.yml` o `docker-compose.proxy.yml`); `install.sh` y los demás scripts del kit la usan. Si ejecuta `docker compose` a mano, use esa orden: `docker compose $(cat generated/compose-args) ps`.
+
 ---
 
 ## 4. Completar el archivo `.env`

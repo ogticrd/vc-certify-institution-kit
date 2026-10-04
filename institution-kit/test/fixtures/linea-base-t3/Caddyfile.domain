@@ -1,5 +1,12 @@
+{
+	email infra@prueba.invalid
+}
+
+# Fragmento `certify_comun` (templates/Caddyfile.comun.inc): actuator, did.json, contextos, logos y
+# proxy a Certify. generate-caddy.sh lo inserta aquí, ANTES del bloque de sitio: Caddy exige que un
+# fragmento esté definido antes de importarlo.
 # ---------------------------------------------------------------------------------------------
-# Rutas comunes a todos los modos (domain, ip y proxy). generate-caddy.sh lo inserta en el
+# Rutas comunes a todos los modos (domain, ip y, en T5, proxy). generate-caddy.sh lo inserta en el
 # Caddyfile de cada modo (variable CADDY_FRAGMENTO_COMUN), antes del bloque de sitio; cada plantilla
 # de modo lo usa con `import certify_comun` dentro de su bloque de sitio. Así hay UNA sola copia de
 # la lógica de rutas.
@@ -18,11 +25,8 @@
 	# y localhost); desde internet es 404, como todo lo demás del actuator. Un comodín en MEDIO de la
 	# ruta no casa en Caddy: las rutas van explícitas. Defensa en profundidad: Certify además solo
 	# expone `health` (T4).
-	# `client_ip` y no `remote_ip`: en domain e ip no hay proxies de confianza y es lo mismo que
-	# remote_ip; en proxy (T5) la IP de conexión es siempre la del proxy ajeno (privada), y client_ip
-	# usa la IP real del cliente según trusted_proxies del Caddyfile de ese modo.
 	handle /v1/certify/actuator/health {
-		@interno client_ip private_ranges
+		@interno remote_ip private_ranges
 		handle @interno {
 			reverse_proxy certify:8090
 		}
@@ -81,4 +85,8 @@
 	handle /v1/certify/* {
 		reverse_proxy certify:8090
 	}
+}
+
+emisor.prueba.invalid {
+	import certify_comun
 }

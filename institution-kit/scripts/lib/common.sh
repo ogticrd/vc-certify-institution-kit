@@ -33,12 +33,37 @@ derive_public_url() {
       IP_HOSTNAME="${ip_dashes}.${provider}"
       CERTIFY_PUBLIC_URL="https://${IP_HOSTNAME}"
       ;;
+    proxy)
+      # Detrás de un proxy inverso ajeno (R6): el kit no conoce el nombre público, lo da la
+      # institución. Sin ACME ni certificados: el TLS lo termina el proxy.
+      if [[ -z "${CERTIFY_PUBLIC_URL:-}" ]]; then
+        echo "ERROR: CERTIFY_PUBLIC_URL es obligatorio con TLS_MODE=proxy: la URL pública que sirve su proxy, p. ej. https://certify.suinstitucion.gob.do (sin barra final)." >&2
+        exit 1
+      fi
+      validate_proxy_public_url
+      ;;
     *)
-      echo "ERROR: TLS_MODE debe ser 'domain' o 'ip' (actual: ${TLS_MODE:-})" >&2
+      echo "ERROR: TLS_MODE debe ser 'domain', 'ip' o 'proxy' (actual: ${TLS_MODE:-})" >&2
       exit 1
       ;;
   esac
   export CERTIFY_PUBLIC_URL IP_HOSTNAME
+}
+
+# CERTIFY_PUBLIC_URL en modo proxy: https://<host>[:puerto], sin ruta ni barra final. (http solo para
+# localhost / 127.0.0.1, pruebas locales: es lo mismo que admite scripts/lib/credencial.mjs.)
+validate_proxy_public_url() {
+  local u="${CERTIFY_PUBLIC_URL}"
+  local https_re='^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$'
+  local local_re='^http://(localhost|127\.0\.0\.1)(:[0-9]{1,5})?$'
+  if [[ "${u}" == */ ]]; then
+    echo "ERROR: CERTIFY_PUBLIC_URL no debe terminar en «/» (valor: ${u})." >&2
+    exit 1
+  fi
+  if ! [[ "${u}" =~ ${https_re} || "${u}" =~ ${local_re} ]]; then
+    echo "ERROR: CERTIFY_PUBLIC_URL debe ser https://<dominio público> sin ruta ni espacios (valor: ${u})." >&2
+    exit 1
+  fi
 }
 
 derive_did_url() {
@@ -47,7 +72,8 @@ derive_did_url() {
     host="${CERTIFY_PUBLIC_URL#https://}"
     host="${host#http://}"
     host="${host%%/*}"
-    DID_URL="did:web:${host}"
+    # did:web codifica el puerto como %3A (did:web:host%3A8443).
+    DID_URL="did:web:${host//:/%3A}"
   fi
   export DID_URL
 }
@@ -69,10 +95,13 @@ apply_defaults() {
   # Servidor de autorización de los ciudadanos (R4): Cuenta Única de producción por defecto. SIN barra
   # final: el emisor (`iss`) del token se compara por igualdad exacta.
   AUTH_ISSUER_URL="${AUTH_ISSUER_URL:-https://auth.cuentaunica.gob.do}"
+  # Modo proxy (R6, D5)
+  CADDY_HTTP_PORT="${CADDY_HTTP_PORT:-8080}"
+  TRUSTED_PROXIES="${TRUSTED_PROXIES:-private_ranges}"
   export CREDENTIAL_DISPLAY_NAME CREDENTIAL_TYPE CREDENTIAL_FORMAT
   export CREDENTIAL_BG_COLOR CREDENTIAL_TEXT_COLOR
   export RESTAPI_SCOPE_ENDPOINT_MAPPING POSTGRES_USER POSTGRES_DB
-  export AUTH_ISSUER_URL
+  export AUTH_ISSUER_URL CADDY_HTTP_PORT TRUSTED_PROXIES
   resolve_secrets
 }
 
@@ -189,7 +218,8 @@ validate_env() {
       missing+=("$var")
     fi
   done
-  if [[ -z "${CADDY_ACME_EMAIL:-}" ]]; then
+  # El correo de ACME (Let's Encrypt) solo lo usa Caddy en domain e ip; en proxy no hay ACME.
+  if [[ "${TLS_MODE:-}" != "proxy" && -z "${CADDY_ACME_EMAIL:-}" ]]; then
     missing+=("CADDY_ACME_EMAIL")
   fi
   if [[ ${#missing[@]} -gt 0 ]]; then
@@ -219,6 +249,20 @@ validate_env() {
   if ! [[ "${AUTH_ISSUER_URL}" =~ ^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?(/[^[:space:]]*[^[:space:]/])?$ ]]; then
     echo "ERROR: AUTH_ISSUER_URL debe ser una URL https sin espacios y SIN barra final (valor: ${AUTH_ISSUER_URL}). Es el emisor del token de Cuenta Única y se compara tal cual." >&2
     exit 1
+  fi
+  if [[ "${TLS_MODE:-}" == "proxy" ]]; then
+    if ! [[ "${CADDY_HTTP_PORT}" =~ ^[0-9]{1,5}$ ]] || (( 10#${CADDY_HTTP_PORT} < 1 || 10#${CADDY_HTTP_PORT} > 65535 )); then
+      echo "ERROR: CADDY_HTTP_PORT debe ser un puerto entre 1 y 65535 (valor: ${CADDY_HTTP_PORT})." >&2
+      exit 1
+    fi
+    # TRUSTED_PROXIES va al Caddyfile: solo `private_ranges` o direcciones/CIDR separadas por espacio.
+    local tp
+    for tp in ${TRUSTED_PROXIES}; do
+      if ! [[ "${tp}" == "private_ranges" || "${tp}" =~ ^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$ ]]; then
+        echo "ERROR: TRUSTED_PROXIES solo admite «private_ranges» o IP/CIDR separadas por espacios (valor no válido: ${tp})." >&2
+        exit 1
+      fi
+    done
   fi
   validate_logo_path
 }
@@ -267,6 +311,7 @@ POSTGRES_USER=${POSTGRES_USER:-postgres}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
 POSTGRES_DB=${POSTGRES_DB:-inji_certify}
 KEYSTORE_PASSWORD=${KEYSTORE_PASSWORD:-}
+CADDY_HTTP_PORT=${CADDY_HTTP_PORT:-8080}
 EOF
   chmod 600 "${tmp}"
   mv "${tmp}" "${RUNTIME_ENV}"
@@ -281,7 +326,12 @@ EOF
 # equivocados. Las rutas son relativas al directorio del kit.
 write_compose_args() {
   mkdir -p "${GENERATED_DIR}"
-  local overlay="docker-compose.tls.yml"
+  local overlay
+  case "${TLS_MODE}" in
+    proxy) overlay="docker-compose.proxy.yml" ;;
+    domain | ip) overlay="docker-compose.tls.yml" ;;
+    *) echo "ERROR: TLS_MODE inválido: ${TLS_MODE}" >&2; exit 1 ;;
+  esac
   printf '%s\n' "-f docker-compose.yml -f ${overlay} --env-file generated/.env.runtime" > "${GENERATED_DIR}/compose-args"
 }
 
@@ -307,6 +357,7 @@ export_env_for_templates() {
   export LOGO_PATH CREDENTIAL_BG_COLOR CREDENTIAL_TEXT_COLOR CREDENTIAL_LABELS_JSON CREDENTIAL_ATTRIBUTE_LABELS
   export RESTAPI_SCOPE_ENDPOINT_MAPPING POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
   export CADDY_ACME_EMAIL RESTAPI_TOKEN_URL AUTH_ISSUER_URL KEYSTORE_PASSWORD
+  export CADDY_HTTP_PORT TRUSTED_PROXIES
 }
 
 # Variables que leen los programas Node (scripts/lib/credencial.mjs) y que `run_node` reenvía al

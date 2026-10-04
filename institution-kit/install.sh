@@ -77,15 +77,25 @@ echo "=== Levantando stack ==="
 "${KIT_COMPOSE[@]}" up -d
 
 echo ""
-echo "Caddy solicitará certificado Let's Encrypt (ACME HTTP-01)."
-if [[ "${TLS_MODE}" == "domain" ]]; then
-  echo "Asegúrese de que DNS apunta a este servidor y el puerto 80 está abierto."
-else
-  echo "Modo IP: hostname ${IP_HOSTNAME:-} debe resolver a este servidor y el puerto 80 debe estar abierto."
-  echo "Si Caddy ya usó certificado interno antes, limpie el volumen: docker compose down && docker volume rm institution-kit_caddy_data"
+case "${TLS_MODE}" in
+  proxy)
+    echo "Modo proxy: Caddy escucha solo HTTP en el puerto ${CADDY_HTTP_PORT} de este servidor (no pide certificados ni abre el 443)."
+    echo "Configure su proxy inverso para que ${CERTIFY_PUBLIC_URL} reenvíe a este servidor, puerto ${CADDY_HTTP_PORT}, con X-Forwarded-For (la IP real del cliente)."
+    ;;
+  domain)
+    echo "Caddy solicitará certificado Let's Encrypt (ACME HTTP-01)."
+    echo "Asegúrese de que DNS apunta a este servidor y el puerto 80 está abierto."
+    ;;
+  *)
+    echo "Caddy solicitará certificado Let's Encrypt (ACME HTTP-01)."
+    echo "Modo IP: hostname ${IP_HOSTNAME:-} debe resolver a este servidor y el puerto 80 debe estar abierto."
+    echo "Si Caddy ya usó certificado interno antes, limpie el volumen: docker compose down && docker volume rm institution-kit_caddy_data"
+    ;;
+esac
+if [[ "${TLS_MODE}" != "proxy" ]]; then
+  echo "Monitoreando logs de Caddy (30s) ..."
+  timeout 30 "${KIT_COMPOSE[@]}" logs -f caddy 2>/dev/null || true
 fi
-echo "Monitoreando logs de Caddy (30s) ..."
-timeout 30 "${KIT_COMPOSE[@]}" logs -f caddy 2>/dev/null || true
 
 echo ""
 echo "=== Verificando endpoints ==="

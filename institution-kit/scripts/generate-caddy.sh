@@ -22,7 +22,11 @@ export CADDY_FRAGMENTO_COMUN
 OUT_FILE="${GENERATED_DIR}/caddy/Caddyfile"
 mkdir -p "$(dirname "${OUT_FILE}")"
 
-[[ -n "${CADDY_ACME_EMAIL:-}" ]] || { echo "ERROR: CADDY_ACME_EMAIL requerido (Let's Encrypt / ACME)" >&2; exit 1; }
+# El correo de ACME solo hace falta cuando Caddy pide certificados (domain, ip); en proxy no hay ACME.
+if [[ "${TLS_MODE}" != "proxy" && -z "${CADDY_ACME_EMAIL:-}" ]]; then
+  echo "ERROR: CADDY_ACME_EMAIL requerido (Let's Encrypt / ACME)" >&2
+  exit 1
+fi
 
 case "${TLS_MODE}" in
   domain)
@@ -36,6 +40,12 @@ case "${TLS_MODE}" in
       "${KIT_DIR}/templates/Caddyfile.ip.tpl" \
       "${OUT_FILE}" \
       '$IP_HOSTNAME $CADDY_ACME_EMAIL $CADDY_FRAGMENTO_COMUN'
+    ;;
+  proxy)
+    render_template \
+      "${KIT_DIR}/templates/Caddyfile.proxy.tpl" \
+      "${OUT_FILE}" \
+      '$TRUSTED_PROXIES $CADDY_FRAGMENTO_COMUN'
     ;;
   *)
     echo "ERROR: TLS_MODE inválido: ${TLS_MODE}" >&2
