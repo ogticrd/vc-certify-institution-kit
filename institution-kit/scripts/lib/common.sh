@@ -173,7 +173,12 @@ validate_proxy_public_url() {
       echo "ERROR: CERTIFY_PUBLIC_URL=${u} usa http: un emisor real necesita https (lo termina su proxy). Solo para pruebas locales, con KIT_PERMITIR_HTTP=1; aun así verify-install.sh no podrá pasar, porque el diagnóstico de OGTIC solo habla https." >&2
       exit 1
     fi
-    echo "AVISO: CERTIFY_PUBLIC_URL usa http (KIT_PERMITIR_HTTP=1): solo para pruebas locales; verify-install.sh fallará (el diagnóstico exige https)." >&2
+    # T9/I9: una vez por cadena de ejecución (install.sh -> generate-config.sh -> cada generador revalidan la URL: eran 9 avisos).
+    # La marca se exporta, así que la heredan los scripts hijos; una ejecución nueva vuelve a avisar.
+    if [[ -z "${KIT_AVISO_HTTP_MOSTRADO:-}" ]]; then
+      echo "AVISO: CERTIFY_PUBLIC_URL usa http (KIT_PERMITIR_HTTP=1): solo para pruebas locales; verify-install.sh fallará (el diagnóstico exige https)." >&2
+      export KIT_AVISO_HTTP_MOSTRADO=1
+    fi
   elif ! [[ "${u}" =~ ${https_re} ]]; then
     echo "ERROR: CERTIFY_PUBLIC_URL debe ser https://<dominio público> sin ruta ni espacios (valor: $(_citar "${u}"))." >&2
     exit 1
