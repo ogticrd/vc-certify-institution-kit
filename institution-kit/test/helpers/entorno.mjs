@@ -95,8 +95,12 @@ export function prepararEntorno({ modo = "domain", extra = {}, runtime = true, g
   else escribirEnv(join(kit, ".env"), { modo, extra: { LOGO_PATH: logo, ...extra } });
 
   // Entorno limpio: ni el de quien ejecuta las pruebas ni variables heredadas del kit.
+  // T9/I13: el kit detecta una «instalación previa» con `docker volume ls` filtrando por el proyecto de compose, que por
+  // defecto es el nombre del directorio (`institution-kit`, también en este kit temporal). Con un kit de verdad en marcha en
+  // la misma máquina las pruebas veían su volumen `pgdata` y 18 fallaban. Un proyecto propio de las pruebas las aísla.
   const env = {
     PATH: process.env.PATH, HOME: raiz, LANG: "C", LC_ALL: "C",
+    COMPOSE_PROJECT_NAME: "kit-prueba", // constante: `docker compose config` debe dar lo mismo en todos los modos
   };
 
   const pasos = {};
