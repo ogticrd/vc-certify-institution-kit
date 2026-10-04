@@ -108,9 +108,13 @@ export function prepararEntorno({ modo = "domain", extra = {}, runtime = true, g
     propiedadesInstitucion: join(gen, "config", "certify-institution.properties"),
     caddyfile: join(gen, "caddy", "Caddyfile"),
     sql: join(gen, "credential_config.sql"),
+    muestra: join(gen, "credencial-muestra.json"),
+    contexto: join(gen, "contextos", `${extra.CREDENTIAL_CONFIG_KEY_ID ?? ENV_BASE.CREDENTIAL_CONFIG_KEY_ID}.json`),
   };
+  // Ejecuta una orden bash en el kit temporal con el mismo entorno limpio (más `adicional`).
+  const ejecutar = (orden, adicional = {}) => bash(kit, orden, { ...env, ...adicional });
   return {
-    raiz, kit, generated: gen, rutas, pasos,
+    raiz, kit, generated: gen, rutas, pasos, ejecutar,
     salida: (pasos.generar ?? pasos.runtime ?? { stdout: "", stderr: "", status: null }),
     existe: (clave) => existsSync(rutas[clave]),
     leer: (clave) => readFileSync(rutas[clave], "utf8"),
@@ -126,7 +130,7 @@ export function prepararEntorno({ modo = "domain", extra = {}, runtime = true, g
 export function valoresSql(sql) {
   const cols = sql.match(/INSERT INTO certify\.credential_config \(([\s\S]*?)\) VALUES \(/)[1]
     .split(",").map((c) => c.trim());
-  const cuerpo = sql.match(/\) VALUES \(\n([\s\S]*?)\n\);/)[1].split("\n").map((l) => l.trim().replace(/,$/, ""));
+  const cuerpo = sql.match(/\) VALUES \(\n([\s\S]*?)\n\)\nON CONFLICT/)[1].split("\n").map((l) => l.trim().replace(/,$/, ""));
   if (cols.length !== cuerpo.length) throw new Error(`columnas ${cols.length} != valores ${cuerpo.length}`);
   return Object.fromEntries(cols.map((c, i) => [c, cuerpo[i]]));
 }

@@ -11,7 +11,8 @@ import {
   prepararEntorno, valoresSql, literal, plantillaDesdeSql, KIT_ORIGEN,
 } from "./helpers/entorno.mjs";
 
-const CTX_V1 = "https://www.w3.org/2018/credentials/v1";
+const CTX_V2 = "https://www.w3.org/ns/credentials/v2";
+const CTX_ED = "https://w3id.org/security/suites/ed25519-2020/v1";
 
 for (const modo of ["domain", "ip"]) {
   describe(`línea base · TLS_MODE=${modo}`, () => {
@@ -20,10 +21,11 @@ for (const modo of ["domain", "ip"]) {
     before(() => { e = prepararEntorno({ modo }); });
     after(() => e.limpiar());
 
-    test("la generación termina bien y produce los cinco ficheros", () => {
+    // T2: de cinco a siete ficheros (se suman el contexto propio y la credencial de muestra).
+    test("la generación termina bien y produce los siete ficheros", () => {
       assert.equal(e.pasos.runtime.status, 0, e.pasos.runtime.stderr);
       assert.equal(e.pasos.generar.status, 0, e.pasos.generar.stderr);
-      for (const clave of ["runtime", "propiedadesDefault", "propiedadesInstitucion", "caddyfile", "sql"]) {
+      for (const clave of ["runtime", "propiedadesDefault", "propiedadesInstitucion", "caddyfile", "sql", "muestra", "contexto"]) {
         assert.ok(e.existe(clave), `falta ${clave}: ${e.rutas[clave]}`);
       }
     });
@@ -41,37 +43,42 @@ for (const modo of ["domain", "ip"]) {
       assert.match(r, /^POSTGRES_PASSWORD=clave-bd-de-mentira$/m);
     });
 
-    test("SQL: un INSERT sin ON CONFLICT y con config_id aleatorio (T2: R7)", () => {
+    // T2 (R7): antes «un INSERT sin ON CONFLICT y con config_id aleatorio (gen_random_uuid)».
+    test("SQL: UPSERT con config_id = clave y ON CONFLICT que conserva status (R7)", () => {
       const sql = e.leer("sql");
       const v = valoresSql(sql);
       assert.equal(literal(v.credential_config_key_id), "PruebaLicencia");
-      assert.equal(v.config_id, "gen_random_uuid()::VARCHAR(255)");
-      assert.doesNotMatch(sql, /ON CONFLICT/i);
+      assert.equal(literal(v.config_id), "PruebaLicencia");
+      assert.match(sql, /ON CONFLICT \(credential_config_key_id\) DO UPDATE SET/);
+      assert.match(sql, /status = certify\.credential_config\.status/);
       assert.equal(literal(v.status), "active");
     });
 
-    test("DEFECTO R1: el único @context es credentials/v1 (la firma no cubrirá los atributos)", () => {
+    // T2 (R1): antes «DEFECTO R1: el único @context es credentials/v1».
+    test("R1: @context con credentials/v2, el contexto propio y la suite (en la columna, ordenados)", () => {
       const sql = e.leer("sql");
-      const v = valoresSql(sql);
-      assert.equal(literal(v.context), CTX_V1);
-      assert.deepEqual(plantillaDesdeSql(sql)["@context"], [CTX_V1]);
-      assert.doesNotMatch(sql, /ed25519-2020|credentials\/v2|\/contextos\//);
+      const propio = `https://${host}/contextos/PruebaLicencia.json`;
+      assert.equal(literal(valoresSql(sql).context), [CTX_ED, CTX_V2, propio].sort().join(","));
+      assert.deepEqual(plantillaDesdeSql(sql)["@context"], [CTX_V2, propio, CTX_ED]);
+      assert.doesNotMatch(sql, /2018\/credentials\/v1/);
     });
 
-    test("DEFECTO R2: los tipos se guardan sin ordenar (<ID>Credential,VerifiableCredential)", () => {
+    // T2 (R2): antes «DEFECTO R2: los tipos se guardan sin ordenar (pruebaCredential,VerifiableCredential)».
+    test("R2: los tipos se guardan ordenados como Java (V… antes que p…)", () => {
       const sql = e.leer("sql");
-      assert.equal(literal(valoresSql(sql).credential_type), "pruebaCredential,VerifiableCredential");
-      // Certify busca con Collections.sort (orden por unidades UTF-16): sería V... antes que p...
-      assert.deepEqual(plantillaDesdeSql(sql).type, ["pruebaCredential", "VerifiableCredential"]);
+      assert.equal(literal(valoresSql(sql).credential_type), "VerifiableCredential,pruebaCredential");
+      assert.deepEqual(plantillaDesdeSql(sql).type, ["VerifiableCredential", "pruebaCredential"]);
     });
 
-    test("DEFECTO R3: la plantilla es VC 1.1 (issuanceDate/expirationDate)", () => {
+    // T2 (R3): antes «DEFECTO R3: la plantilla es VC 1.1 (issuanceDate/expirationDate)»; el id pasa
+    // al principio del credentialSubject (como el emisor propio).
+    test("R3: la plantilla es VC 2.0 (validFrom/validUntil)", () => {
       const t = plantillaDesdeSql(e.leer("sql"));
-      assert.equal(t.issuanceDate, "${validFrom}");
-      assert.equal(t.expirationDate, "${validUntil}");
-      assert.equal(t.validFrom, undefined);
-      assert.equal(t.validUntil, undefined);
-      assert.deepEqual(Object.keys(t.credentialSubject), ["nombre", "apellido", "numeroLicencia", "id"]);
+      assert.equal(t.validFrom, "${validFrom}");
+      assert.equal(t.validUntil, "${validUntil}");
+      assert.equal(t.issuanceDate, undefined);
+      assert.equal(t.expirationDate, undefined);
+      assert.deepEqual(Object.keys(t.credentialSubject), ["id", "nombre", "apellido", "numeroLicencia"]);
     });
 
     test("SQL: atributos en credential_subject y display_order en el orden del .env", () => {
@@ -144,23 +151,27 @@ for (const modo of ["domain", "ip"]) {
 }
 
 describe("línea base · casos límite del comportamiento actual", () => {
-  test("CREDENTIAL_TYPE explícito se guarda tal cual, sin ordenar (R2)", () => {
+  // T2 (R2): antes «CREDENTIAL_TYPE explícito se guarda tal cual, sin ordenar» (Zeta…,Verifiable…).
+  test("CREDENTIAL_TYPE explícito se guarda ordenado (R2)", () => {
     const e = prepararEntorno({ extra: { CREDENTIAL_TYPE: "ZetaCredential,VerifiableCredential" } });
     try {
       assert.equal(e.salida.status, 0, e.salida.stderr);
-      assert.equal(literal(valoresSql(e.leer("sql")).credential_type), "ZetaCredential,VerifiableCredential");
+      assert.equal(literal(valoresSql(e.leer("sql")).credential_type), "VerifiableCredential,ZetaCredential");
     } finally { e.limpiar(); }
   });
 
-  test("DEFECTO: una etiqueta con ':' se trunca (split(\":\") en generate-credential-sql.sh)", () => {
+  // T2: antes «DEFECTO: una etiqueta con ':' se trunca (split(":"))». Ahora el formato «attr:Etiqueta»
+  // se rechaza con un mensaje y las etiquetas van en CREDENTIAL_LABELS_JSON, donde «:» es un carácter más.
+  test("una etiqueta con ':' se conserva entera (CREDENTIAL_LABELS_JSON)", () => {
     const e = prepararEntorno({
-      extra: { CREDENTIAL_ATTRIBUTE_LABELS: "nombre:Nombre,apellido:Apellido,numeroLicencia:Licencia: nº" },
+      extra: { CREDENTIAL_LABELS_JSON: '{"nombre":"Nombre","numeroLicencia":"Licencia: nº"}' },
     });
     try {
       assert.equal(e.salida.status, 0, e.salida.stderr);
       const sujeto = JSON.parse(literal(valoresSql(e.leer("sql")).credential_subject));
       assert.equal(sujeto.nombre.display[0].name, "Nombre");
-      assert.equal(sujeto.numeroLicencia.display[0].name, "Licencia"); // debería ser «Licencia: nº»
+      assert.equal(sujeto.numeroLicencia.display[0].name, "Licencia: nº");
+      assert.equal(sujeto.apellido.display[0].name, "apellido"); // sin etiqueta: el nombre del atributo
     } finally { e.limpiar(); }
   });
 

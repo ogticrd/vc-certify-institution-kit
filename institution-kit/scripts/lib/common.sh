@@ -54,8 +54,10 @@ derive_did_url() {
 
 apply_defaults() {
   CREDENTIAL_DISPLAY_NAME="${CREDENTIAL_DISPLAY_NAME:-${INSTITUTION_DISPLAY_NAME}}"
-  CREDENTIAL_TYPE="${CREDENTIAL_TYPE:-${INSTITUTION_ID}Credential,VerifiableCredential}"
-  CREDENTIAL_CONTEXT="${CREDENTIAL_CONTEXT:-https://www.w3.org/2018/credentials/v1}"
+  # El orden en que se escriben tipos y contextos en la base de datos lo fija
+  # scripts/lib/credencial.mjs (como Collections.sort de Java); aquí solo el valor por defecto.
+  # El contexto ya no es una entrada: lo genera el kit (scripts/generate-context.mjs).
+  CREDENTIAL_TYPE="${CREDENTIAL_TYPE:-VerifiableCredential,${INSTITUTION_ID}Credential}"
   CREDENTIAL_FORMAT="${CREDENTIAL_FORMAT:-ldp_vc}"
   CREDENTIAL_LOGO_URL="${CREDENTIAL_LOGO_URL:-https://mosip.github.io/inji-config/logos/agro-vertias-logo.png}"
   CREDENTIAL_BG_COLOR="${CREDENTIAL_BG_COLOR:-#12107c}"
@@ -66,7 +68,7 @@ apply_defaults() {
   POSTGRES_USER="${POSTGRES_USER:-postgres}"
   POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postgres}"
   POSTGRES_DB="${POSTGRES_DB:-inji_certify}"
-  export CREDENTIAL_DISPLAY_NAME CREDENTIAL_TYPE CREDENTIAL_CONTEXT CREDENTIAL_FORMAT
+  export CREDENTIAL_DISPLAY_NAME CREDENTIAL_TYPE CREDENTIAL_FORMAT
   export CREDENTIAL_LOGO_URL CREDENTIAL_BG_COLOR CREDENTIAL_TEXT_COLOR
   export RESTAPI_SCOPE_ENDPOINT_MAPPING POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
 }
@@ -155,12 +157,10 @@ CREDENTIAL_ATTRIBUTES=${CREDENTIAL_ATTRIBUTES}
 CREDENTIAL_SCOPE=${CREDENTIAL_SCOPE}
 CREDENTIAL_DISPLAY_NAME=${CREDENTIAL_DISPLAY_NAME}
 CREDENTIAL_TYPE=${CREDENTIAL_TYPE}
-CREDENTIAL_CONTEXT=${CREDENTIAL_CONTEXT}
 CREDENTIAL_FORMAT=${CREDENTIAL_FORMAT}
 CREDENTIAL_LOGO_URL=${CREDENTIAL_LOGO_URL}
 CREDENTIAL_BG_COLOR=${CREDENTIAL_BG_COLOR}
 CREDENTIAL_TEXT_COLOR=${CREDENTIAL_TEXT_COLOR}
-CREDENTIAL_ATTRIBUTE_LABELS=${CREDENTIAL_ATTRIBUTE_LABELS:-}
 RESTAPI_SCOPE_ENDPOINT_MAPPING=${RESTAPI_SCOPE_ENDPOINT_MAPPING}
 POSTGRES_USER=${POSTGRES_USER}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -174,8 +174,55 @@ export_env_for_templates() {
   export INSTITUTION_ID INSTITUTION_DISPLAY_NAME RESTAPI_BASE_URL
   export OAUTH_CLIENT_ID OAUTH_CLIENT_SECRET
   export CREDENTIAL_CONFIG_KEY_ID CREDENTIAL_ATTRIBUTES CREDENTIAL_SCOPE
-  export CREDENTIAL_DISPLAY_NAME CREDENTIAL_TYPE CREDENTIAL_CONTEXT CREDENTIAL_FORMAT
-  export CREDENTIAL_LOGO_URL CREDENTIAL_BG_COLOR CREDENTIAL_TEXT_COLOR CREDENTIAL_ATTRIBUTE_LABELS
+  export CREDENTIAL_DISPLAY_NAME CREDENTIAL_TYPE CREDENTIAL_FORMAT
+  export CREDENTIAL_LOGO_URL CREDENTIAL_BG_COLOR CREDENTIAL_TEXT_COLOR CREDENTIAL_LABELS_JSON CREDENTIAL_ATTRIBUTE_LABELS
   export RESTAPI_SCOPE_ENDPOINT_MAPPING POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
   export CADDY_ACME_EMAIL
+}
+
+# Variables que leen los programas Node (scripts/lib/credencial.mjs) y que `run_node` reenvía al
+# contenedor cuando no hay Node local.
+NODE_ENV_VARS=(
+  CREDENTIAL_CONFIG_KEY_ID CREDENTIAL_ATTRIBUTES CREDENTIAL_TYPE CREDENTIAL_LABELS_JSON
+  CREDENTIAL_ATTRIBUTE_LABELS CREDENTIAL_DISPLAY_NAME CREDENTIAL_LOGO_URL CREDENTIAL_BG_COLOR
+  CREDENTIAL_TEXT_COLOR CREDENTIAL_SCOPE CREDENTIAL_FORMAT CERTIFY_PUBLIC_URL DID_URL
+  INSTITUTION_ID INSTITUTION_DISPLAY_NAME
+)
+NODE_IMAGE="${NODE_IMAGE:-node:22-alpine}"
+
+# Ejecuta un programa de scripts/ con Node, sin exigir Node en el servidor: usa `node` si existe
+# y, si no, `docker run` con la imagen ${NODE_IMAGE} y el kit montado en /kit. Con
+# KIT_FORCE_DOCKER=1 usa siempre el contenedor; con KIT_DRY_RUN=1 imprime el comando en vez de
+# ejecutarlo. Los ficheros salen con el usuario de quien lo corre (no root).
+#   run_node generate-context.mjs [argumentos…]
+run_node() {
+  local programa="$1"; shift
+  local cmd
+  if [[ -z "${KIT_FORCE_DOCKER:-}" ]] && command -v node >/dev/null 2>&1; then
+    cmd=(node "scripts/${programa}" "$@")
+    ( cd "${KIT_DIR}" && _ejecutar_o_mostrar "${cmd[@]}" )
+  else
+    command -v docker >/dev/null 2>&1 || {
+      echo "ERROR: hace falta Node 18+ o Docker para generar la credencial (no se encontró ninguno)." >&2
+      return 1
+    }
+    cmd=(docker run --rm --user "$(id -u):$(id -g)" -v "${KIT_DIR}:/kit" -w /kit)
+    local v
+    for v in "${NODE_ENV_VARS[@]}"; do cmd+=(-e "${v}"); done
+    cmd+=("${NODE_IMAGE}" node "/kit/scripts/${programa}" "$@")
+    _ejecutar_o_mostrar "${cmd[@]}"
+  fi
+}
+
+_ejecutar_o_mostrar() {
+  if [[ -n "${KIT_DRY_RUN:-}" ]]; then
+    local primero=1 x
+    for x in "$@"; do
+      if [[ -n "${primero}" ]]; then primero=""; else printf ' '; fi
+      printf '%q' "${x}"
+    done
+    printf '\n'
+  else
+    "$@"
+  fi
 }
