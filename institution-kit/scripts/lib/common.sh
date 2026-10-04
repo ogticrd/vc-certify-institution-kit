@@ -348,6 +348,27 @@ load_compose_args() {
   KIT_COMPOSE=(docker compose "${args[@]}")
 }
 
+# Espera a que Certify responda UP, por la red interna (R9: el actuator no se publica). Desde el
+# contenedor de Caddy a Certify; necesita load_compose_args. Devuelve 0 si llega a UP y 1 si se agotan
+# los intentos (la última respuesta queda en HEALTH_ULTIMA_RESPUESTA).
+#   wait_for_health [intentos=60] [segundos entre intentos=5]
+wait_for_health() {
+  local max="${1:-60}" pausa="${2:-5}" i status response=""
+  HEALTH_ULTIMA_RESPUESTA=""
+  for ((i = 1; i <= max; i++)); do
+    if response=$(cd "${KIT_DIR}" && "${KIT_COMPOSE[@]}" exec -T caddy wget -qO- http://certify:8090/v1/certify/actuator/health 2>/dev/null); then
+      status=$(echo "${response}" | jq -r '.status // empty' 2>/dev/null || true)
+      if [[ "${status}" == "UP" ]]; then return 0; fi
+    fi
+    if ((i < max)); then
+      echo "  Intento ${i}/${max} — esperando ${pausa}s ..." >&2
+      sleep "${pausa}"
+    fi
+  done
+  HEALTH_ULTIMA_RESPUESTA="${response:-sin respuesta}"
+  return 1
+}
+
 export_env_for_templates() {
   export CERTIFY_PUBLIC_URL CERTIFY_PUBLIC_HOST IP_HOSTNAME TLS_MODE DID_URL
   export INSTITUTION_ID INSTITUTION_DISPLAY_NAME RESTAPI_BASE_URL

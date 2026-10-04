@@ -359,7 +359,15 @@ case "$*" in
   *openid-credential-issuer*) echo '{"credential_endpoint":"https://certify.prueba.invalid/v1/certify/issuance/credential"}';;
 esac
 `);
-      chmodSync(join(bin, "docker"), 0o755); chmodSync(join(bin, "curl"), 0o755);
+      // `node` falso SOLO para el programa de verificación (T6: install.sh llama a verify-install.sh, que
+      // diagnosticaría https://certify.prueba.invalid de verdad); lo demás va al node real.
+      writeFileSync(join(bin, "node"), `#!/bin/sh
+case "$*" in
+  *verificar-instalacion.mjs*) echo "Resumen: simulado"; exit 0;;
+esac
+exec "${process.execPath}" "$@"
+`);
+      chmodSync(join(bin, "docker"), 0o755); chmodSync(join(bin, "curl"), 0o755); chmodSync(join(bin, "node"), 0o755);
       const r = e.ejecutar('bash install.sh', { PATH: `${bin}:${process.env.PATH}` });
       assert.equal(r.status, 0, r.stdout + r.stderr);
       const llamadas = readFileSync(registro, "utf8").trim().split("\n").filter((l) => !l.startsWith("docker compose version"));

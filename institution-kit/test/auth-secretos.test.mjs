@@ -133,8 +133,8 @@ describe("R9 · actuator (D8)", () => {
     try {
       const p = e.leer("propiedadesDefault").replaceAll("\\\n", "");
       assert.match(p, /^mosip\.certify\.security\.ignore-auth-urls=\/actuator\/\*\*,/m);
-      // …y la comprobación de install.sh/verify-health.sh es justo esa petición interna.
-      const v = readFileSync(join(KIT_ORIGEN, "scripts", "verify-health.sh"), "utf8");
+      // …y la comprobación de install.sh/verify-install.sh (wait_for_health, en common.sh) es justo esa petición interna.
+      const v = readFileSync(join(KIT_ORIGEN, "scripts", "lib", "common.sh"), "utf8");
       assert.match(v, /certify:8090\/v1\/certify\/actuator\/health/);
     } finally { e.limpiar(); }
   });

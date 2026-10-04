@@ -98,9 +98,14 @@ if [[ "${TLS_MODE}" != "proxy" ]]; then
 fi
 
 echo ""
-echo "=== Verificando endpoints ==="
+echo "=== Esperando a Certify (health por la red interna) ==="
 export CERTIFY_PUBLIC_URL TLS_MODE
-"${KIT_DIR}/scripts/verify-health.sh"
+if ! wait_for_health 60 5; then
+  echo "ERROR: Certify no respondió UP tras 300s" >&2
+  echo "Última respuesta: ${HEALTH_ULTIMA_RESPUESTA}" >&2
+  exit 1
+fi
+echo "  Health: UP"
 
 # El DID corregido (R5) necesita a Certify en marcha: lleva su clave pública. Hasta ahora Caddy servía
 # el DID de Certify sin corregir (assertionMethod con el DID pelado); desde aquí, el corregido.
@@ -108,17 +113,20 @@ echo ""
 echo "=== Corrigiendo el DID (assertionMethod) ==="
 "${KIT_DIR}/scripts/generate-did.sh"
 
-echo "Comprobando ${CERTIFY_PUBLIC_URL}/.well-known/did.json ..."
-did_publicado="$(curl -sf "${CERTIFY_PUBLIC_URL}/.well-known/did.json" || true)"
-if ! echo "${did_publicado}" | jq -e '(.assertionMethod | length > 0) and all(.assertionMethod[]; (type == "object" and has("id")) or (type == "string" and test("#")))' >/dev/null 2>&1; then
-  echo "ERROR: el did.json publicado no tiene assertionMethod con el id de la clave (¿Caddy lo sirve desde generated/did?)." >&2
-  exit 1
-fi
-echo "  did.json: assertionMethod conforme"
+# Verificación (R8): salud, el diagnóstico de OGTIC contra la URL pública y la cobertura de firma de la
+# credencial de muestra. Va después de corregir el DID (la comprobación 10 lo lee). Si algo FALLA, el
+# resumen se imprime igual (los datos para OGTIC siguen valiendo) y install.sh sale con ese código.
+echo ""
+codigo=0
+"${KIT_DIR}/scripts/verify-install.sh" || codigo=$?
 
 echo ""
 echo "============================================"
-echo " Instalación completada"
+if [[ "${codigo}" -eq 0 ]]; then
+  echo " Instalación completada"
+else
+  echo " Instalación terminada, pero la verificación FALLÓ (código ${codigo})"
+fi
 echo "============================================"
 echo " CERTIFY_PUBLIC_URL: ${CERTIFY_PUBLIC_URL}"
 echo " INSTITUTION_ID:     ${INSTITUTION_ID}"
@@ -130,3 +138,4 @@ echo " Health: solo por la red interna (el actuator no se publica en internet)"
 echo " DID:    ${CERTIFY_PUBLIC_URL}/.well-known/did.json"
 echo " Issuer: ${CERTIFY_PUBLIC_URL}/.well-known/openid-credential-issuer"
 echo "============================================"
+exit "${codigo}"

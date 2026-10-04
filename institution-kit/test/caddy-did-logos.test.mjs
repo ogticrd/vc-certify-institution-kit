@@ -437,12 +437,13 @@ describe("el orden de install.sh (R5): el DID se corrige con Certify ya en march
   const install = readFileSync(join(KIT_ORIGEN, "install.sh"), "utf8");
   const config = readFileSync(join(KIT_ORIGEN, "scripts", "generate-config.sh"), "utf8");
 
-  test("generate-did.sh va después de verify-health.sh y antes del resumen final", () => {
-    const iSalud = install.indexOf("scripts/verify-health.sh");
+  test("generate-did.sh va después de esperar la salud de Certify y antes de verify-install.sh y del resumen final", () => {
+    const iSalud = install.indexOf("wait_for_health 60 5");
     const iDid = install.indexOf("scripts/generate-did.sh");
+    const iVerificacion = install.indexOf("scripts/verify-install.sh");
     const iFinal = install.indexOf("Instalación completada");
-    assert.ok(iSalud !== -1 && iDid !== -1 && iFinal !== -1);
-    assert.ok(iSalud < iDid && iDid < iFinal);
+    assert.ok(iSalud !== -1 && iDid !== -1 && iVerificacion !== -1 && iFinal !== -1);
+    assert.ok(iSalud < iDid && iDid < iVerificacion && iVerificacion < iFinal);
     assert.ok(install.indexOf('"${KIT_COMPOSE[@]}" up -d') !== -1 && install.indexOf('"${KIT_COMPOSE[@]}" up -d') < iSalud);
   });
 
@@ -452,8 +453,8 @@ describe("el orden de install.sh (R5): el DID se corrige con Certify ya en march
     assert.match(config, /mkdir -p .*generated\/did/);
   });
 
-  test("verify-health.sh pregunta el health por la red interna: el actuator ya no es público", () => {
-    const t = readFileSync(join(KIT_ORIGEN, "scripts", "verify-health.sh"), "utf8");
+  test("la espera del health (common.sh, que usan install.sh y verify-install.sh) va por la red interna: el actuator ya no es público", () => {
+    const t = readFileSync(join(KIT_ORIGEN, "scripts", "lib", "common.sh"), "utf8");
     assert.match(t, /"\$\{KIT_COMPOSE\[@\]\}" exec -T caddy wget -qO- http:\/\/certify:8090\/v1\/certify\/actuator\/health/);
     assert.doesNotMatch(t, /curl[^\n]*actuator\/health/);
   });

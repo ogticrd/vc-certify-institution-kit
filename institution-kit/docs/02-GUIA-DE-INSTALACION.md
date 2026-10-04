@@ -286,7 +286,7 @@ Si el script termina con `ERROR`, ver sección 8.
 Puede repetir la verificación automática:
 
 ```bash
-./scripts/verify-health.sh
+./scripts/verify-install.sh
 ```
 
 O realizar una validación manual.
