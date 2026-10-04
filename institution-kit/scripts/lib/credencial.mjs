@@ -52,6 +52,17 @@ export const RESERVADOS = new Set([
   "revoked", "publicKeyMultibase",
   // ligados a la plantilla y al contexto propio
   "_issuer", "_holderId", "v", "xsd",
+  // K14: variables que Certify inyecta en el MISMO mapa que los datos de la plantilla
+  // (CertifyIssuanceServiceImpl y VelocityTemplatingEngineImpl.format): un atributo con ese nombre pisa o es
+  // pisado (p. ej. `credentialId` del dato acaba como `id` de primer nivel de la credencial). La prueba
+  // test/reservados-certify.test.mjs las extrae del fuente de Certify, así que una nueva obliga a reservarla aquí.
+  "credentialId", "didUrl", "templateName", "renderingTemplateId", "vct", "rootContext", "envConfigs",
+  "_esc", "_dateTool", "_doctype", "_renderMethodSVGdigest", "claim_169_values",
+  // K15: propiedades de Object (`ctx[a] = …` con `__proto__` invoca el setter y no define el término; `toString`
+  // pierde su etiqueta; `hasOwnProperty` tumba a jsonld.js) y de la plantilla Velocity (`$class`, `$null`).
+  "__proto__", "constructor", "prototype", "toString", "valueOf", "hasOwnProperty", "isPrototypeOf",
+  "propertyIsEnumerable", "toLocaleString", "__defineGetter__", "__defineSetter__", "__lookupGetter__",
+  "__lookupSetter__",
 ]);
 
 // `Collections.sort` de Java ordena Strings por unidades UTF-16, con mayúsculas antes que
@@ -128,7 +139,7 @@ export function leerEntrada(env, { paraSql = false } = {}) {
     falla("CREDENTIAL_ATTRIBUTE_LABELS (formato «attr:Etiqueta», que truncaba las etiquetas con «:») ya no se admite. "
       + "Use CREDENTIAL_LABELS_JSON='{\"attr\":\"Etiqueta\"}'.");
   }
-  let etiquetas = {};
+  let etiquetas = Object.create(null); // sin prototipo: `etiquetas.toString` no puede ser la función de Object
   if (env.CREDENTIAL_LABELS_JSON && String(env.CREDENTIAL_LABELS_JSON).trim()) {
     let j;
     try { j = JSON.parse(env.CREDENTIAL_LABELS_JSON); } catch (e) { falla(`CREDENTIAL_LABELS_JSON no es JSON válido: ${e.message}.`); }
@@ -138,7 +149,7 @@ export function leerEntrada(env, { paraSql = false } = {}) {
       if (typeof v !== "string" || v.trim() === "") falla(`CREDENTIAL_LABELS_JSON: la etiqueta de «${k}» debe ser un texto no vacío.`);
       sinControl(v, "CREDENTIAL_LABELS_JSON");
     }
-    etiquetas = j;
+    etiquetas = Object.assign(Object.create(null), j);
   }
 
   const formato = String(env.CREDENTIAL_FORMAT ?? "").trim() || "ldp_vc";
