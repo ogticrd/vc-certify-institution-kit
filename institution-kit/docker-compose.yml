@@ -1,0 +1,77 @@
+services:
+  database:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-inji_certify}
+    volumes:
+      - ./sql/00-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./generated/credential_config.sql:/docker-entrypoint-initdb.d/02-credential_config.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-inji_certify}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - certify-net
+
+  certify:
+    build:
+      context: ..
+      dockerfile: institution-kit/Dockerfile
+    environment:
+      - container_user=mosip
+      - active_profile_env=default,institution
+      - SPRING_CONFIG_NAME=certify
+      - SPRING_CONFIG_LOCATION=/home/mosip/config/
+      - install_hsm_client=false
+      - download_hsm_client=false
+      - enable_certify_artifactory=false
+      - DATABASE_HOST=database
+      - DATABASE_PORT=5432
+      - DATABASE_USERNAME=${POSTGRES_USER:-postgres}
+      - DATABASE_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+    command:
+      [
+        "java",
+        "-jar",
+        "-Dloader.path=/home/mosip/additional_jars/",
+        "-Dspring.cloud.config.enabled=false",
+        "-Dspring.profiles.active=default,institution",
+        "-Dspring.config.name=certify",
+        "-Dspring.config.location=file:/home/mosip/config/",
+        "certify-service.jar",
+      ]
+    volumes:
+      - ./generated/config/certify-default.properties:/home/mosip/config/certify-default.properties:ro
+      - ./generated/config/certify-institution.properties:/home/mosip/config/certify-institution.properties:ro
+      - certify-pkcs12:/home/mosip/CERTIFY_PKCS12
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - certify-net
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./generated/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - certify
+    networks:
+      - certify-net
+
+networks:
+  certify-net:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
+  certify-pkcs12:
