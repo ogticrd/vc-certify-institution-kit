@@ -1,136 +1,170 @@
-# Lista de pre-requisitos para instituciones emisoras — Inji Certify
+# Lista de prerrequisitos para instituciones emisoras
 
-Este documento lista todo lo que una institución debe tener listo antes de ejecutar el kit de implementación.
+Este documento lista todo lo que una institución debe tener listo **antes** de ejecutar el kit. Si algún punto no está claro, resuélvalo con OGTIC antes de instalar: varios valores solo los entrega OGTIC y el kit no arranca sin ellos.
 
-El despliegue levanta Inji Certify, una base de datos PostgreSQL y Caddy (proxy HTTPS) en un servidor propio de la institución.
+El kit levanta tres contenedores en un servidor propio de la institución: **Inji Certify** (el emisor), **PostgreSQL** (su base de datos) y **Caddy** (la puerta de entrada pública). Una descripción general está en el [README del kit](../README.md).
 
-**Siguiente paso:** cuando complete este checklist, continúe con [02-GUIA-DE-INSTALACION.md](./02-GUIA-DE-INSTALACION.md).
+**Siguiente paso:** cuando complete esta lista, continúe con [02-GUIA-DE-INSTALACION.md](./02-GUIA-DE-INSTALACION.md).
 
 ---
 
-## Infraestructura
+## 1. Infraestructura
 
-Toda la información de servidor, software, red, DNS y puertos está en esta sección. El equipo de infraestructura debe cubrirla completa antes de la instalación.
+El equipo de infraestructura debe cubrir esta sección completa antes de la instalación.
 
-Para desplegar Inji Certify la institución debe disponer de un servidor con las características de hardware indicadas más abajo. En ese servidor se instalan las herramientas, se registra el DNS (si aplica) y se abren los puertos.
+### 1.1 Herramientas obligatorias en el servidor
 
-### Herramientas obligatorias
+- **Git**: para clonar el repositorio con el kit.
+- **Docker Engine 24 o superior y Docker Compose v2** (el comando `docker compose`, no `docker-compose`). Los componentes se levantan con Docker Compose.
+- **`curl` y `jq`**: `jq` lo usan los scripts para leer las respuestas del servicio.
+- **`openssl`**: el kit lo usa para generar contraseñas aleatorias.
+- **`envsubst`**: viene en el paquete `gettext-base` (Debian y Ubuntu: `sudo apt-get install -y gettext-base`) o `gettext` (RHEL y Fedora). El kit lo usa para generar la configuración y `install.sh` se detiene si no está.
 
-- **Git:** es necesario tener instalado git para poder clonar el repositorio de Inji Certify.
-- **Docker Engine & Docker Compose:** los componentes necesarios para la emisión de la credencial se levantan utilizando Docker Compose. Para Docker Engine utilizar como mínimo la versión 24, e instalar la versión 2 de Docker Compose.
-- **Curl y jq:** para poder verificar desde el servidor los endpoints de health check y hacer verificaciones básicas. `jq` se utiliza para la verificación automática de healthcheck.
+**No hace falta instalar Node.js.** Dos pasos del kit (generar el contexto de la credencial y verificar la instalación) usan Node; si el servidor no lo tiene, los ejecutan dentro de un contenedor `node:22-alpine` que Docker descarga la primera vez.
 
-### Hardware requerido
-
-Ese servidor debe cumplir al menos con las siguientes características:
+### 1.2 Hardware requerido
 
 - 4 vCPU
 - 8 GB de memoria RAM
-- 50 GB de disco duro
-- SO Linux x86_64 compatible con Docker Engine, por ejemplo Ubuntu 22/24
+- 50 GB de disco
+- Linux x86_64 compatible con Docker Engine, por ejemplo Ubuntu 22 o 24
 
-### Acceso al repositorio
+### 1.3 Acceso al repositorio
 
-Solicitar a OGTIC acceso e información necesaria para clonar el repositorio y el branch indicados por OGTIC.
+Solicite a OGTIC el acceso y la dirección del repositorio y de la rama que debe clonar. Debe clonar el repositorio **completo**, no solo la carpeta `institution-kit/`: la imagen de Certify se construye con el código que está fuera de esa carpeta.
 
-### DNS y TLS
+### 1.4 Cómo será alcanzable el emisor desde internet
 
-El emisor debe ser alcanzable desde internet. El servidor debe poder iniciar las conexiones HTTPS de salida indicadas en la tabla de puertos más abajo.
+El emisor debe ser alcanzable desde internet por HTTPS: las billeteras y los verificadores leen sus documentos públicos. Elija **uno solo** de los tres modos y configúrelo con `TLS_MODE` en el archivo `.env`.
 
-El servidor debe tener una IP pública fija (o un mecanismo análogo: IP elástica/reservada, o DNS dinámico estable) para poder registrar el DNS o derivar un hostname en modo IP. Sin una IP estable, el registro A/AAAA no apunta de forma confiable al emisor.
-
-El kit soporta dos modos de acceso público (variable `TLS_MODE` en el archivo `.env`). Elija **uno solo**.
+| Modo | Úselo cuando… |
+|---|---|
+| `domain` | Tiene un nombre de dominio que apunta al servidor y no hay un proxy inverso delante. |
+| `ip` | No tiene dominio: solo la IP pública del servidor. |
+| `proxy` | Ya existe un proxy inverso de la institución (nginx, F5, un balanceador) que publica el servicio y termina el HTTPS. |
 
 #### Modo dominio (`TLS_MODE=domain`)
 
-Usar cuando la institución tiene un nombre de dominio propio que apunta al servidor.
+- Registre un subdominio DNS, por ejemplo `certify.institucion.gob.do`.
+- Agregue un registro tipo A (o AAAA) hacia la IP pública fija del servidor.
+- En el `.env` indique `CERTIFY_PUBLIC_HOST` (el dominio, sin `https://`) y `CADDY_ACME_EMAIL` (un correo de infraestructura; Let's Encrypt lo usa para avisos).
 
-- Registrar un subdominio DNS, por ejemplo: `certify.institucion.gob.do`
-- Agregar un registro tipo A (o AAAA) a la IP pública fija del servidor
-- En el `.env` indicar `CERTIFY_PUBLIC_HOST` (el dominio, sin `https://`) y `CADDY_ACME_EMAIL` (correo de infraestructura)
-
-Caddy obtiene y renueva automáticamente el certificado HTTPS con Let's Encrypt (ACME HTTP-01).
+Caddy obtiene y renueva solo el certificado HTTPS con Let's Encrypt (validación ACME HTTP-01). El servidor necesita una IP pública fija, o un mecanismo equivalente (IP reservada, DNS dinámico estable): sin ella, el registro DNS no apunta de forma confiable al emisor.
 
 #### Modo IP (`TLS_MODE=ip`)
 
-Usar cuando la institución no provee un nombre de dominio propio.
+- En el `.env` indique la IP pública del servidor (`SERVER_PUBLIC_IP`; no una IP de red interna como `192.168.x.x`), el proveedor de nombres (`IP_DNS_PROVIDER`, por defecto `sslip.io`; también sirve `nip.io`) y `CADDY_ACME_EMAIL`.
+- El kit deriva un nombre usable, por ejemplo `https://203-0-113-10.sslip.io`.
+- Caddy pide el certificado a Let's Encrypt igual que en modo dominio, por lo que necesita el puerto 80 abierto desde internet.
 
-- Indicar en el `.env` la IP pública del servidor (`SERVER_PUBLIC_IP`), el proveedor DNS dinámico (por defecto `sslip.io`; también puede usarse `nip.io`) y `CADDY_ACME_EMAIL`
-- El kit deriva un hostname usable, por ejemplo: `https://203-0-113-10.sslip.io`
-- Caddy solicita un certificado HTTPS a Let's Encrypt (ACME HTTP-01), igual que en modo dominio. Requiere puerto 80 abierto desde internet.
+#### Modo proxy (`TLS_MODE=proxy`)
 
-### Puertos de red (entrada y salida)
+El HTTPS lo pone el proxy de la institución, no el kit. Caddy escucha solo HTTP, **no pide certificados y no abre el 443**. Necesita:
 
-El equipo de infraestructura debe asegurar que los siguientes puertos estén disponibles:
+- **`CERTIFY_PUBLIC_URL`**, obligatoria: la dirección pública que sirve su proxy, con la forma `https://certify.institucion.gob.do` (sin ruta y sin barra final). En los otros dos modos el kit la calcula solo; en este no puede, porque el nombre público lo decide el proxy.
+- Que el proxy **reenvíe a `http://<este servidor>:<CADDY_HTTP_PORT>`** (8080 por defecto).
+- Que el proxy **envíe `X-Forwarded-For` con la IP real del cliente**. De eso depende que el estado de salud interno de Certify no quede visible desde internet (detalle en la guía, sección 3C).
+- Que el servidor pueda **alcanzar su propia dirección pública** (la verificación final se hace desde el servidor contra esa URL).
 
-| Puerto | Dirección | Destino | Razón |
-|--------|-----------|---------|-------|
-| 80/tcp | in | Internet → servidor (Caddy) | Validación ACME HTTP-01 (Let's Encrypt) y renovación automática del certificado. Obligatorio en ambos modos (`domain` e `ip`). |
-| 443/tcp | in | Internet → servidor (Caddy) | HTTPS público del emisor (OID4VCI, health, DID). Obligatorio en ambos modos. |
-| 443/tcp | out | `auth.cuentaunica.gob.do` | Validación de tokens JWT de Cuenta Única (claves públicas en `/.well-known/jwks.json`). |
-| 443/tcp | out | URL de la API de datos de la institución | Obtener los datos del ciudadano para armar la credencial. |
-| 443/tcp | out | Registries Docker / Maven | Descarga de imágenes y dependencias en el build (primera instalación). |
+### 1.5 Puertos de red
 
-**Nota:** el puerto interno de Certify (8090) no se publica en internet. Caddy recibe el tráfico HTTPS en el 443, lo desencripta y lo reenvía a Certify por la red interna de Docker. El puerto 80 debe estar abierto desde internet para que Caddy pueda obtener y renovar el certificado con Let’s Encrypt.
+Los puertos de entrada dependen del modo.
 
----
+| Puerto | Dirección | Modos | Origen o destino | Razón |
+|---|---|---|---|---|
+| 80/tcp | entrada | `domain`, `ip` | Internet → servidor (Caddy) | Validación ACME HTTP-01 de Let's Encrypt y renovación del certificado. |
+| 443/tcp | entrada | `domain`, `ip` | Internet → servidor (Caddy) | HTTPS público del emisor. |
+| `CADDY_HTTP_PORT` (8080 por defecto) | entrada | `proxy` | **Solo el proxy** → servidor (Caddy) | El proxy reenvía aquí el tráfico en HTTP. El servidor **no** abre el 80 ni el 443. |
+| 443/tcp | salida | todos | servidor → `auth.cuentaunica.gob.do` | Descarga de las llaves públicas de Cuenta Única para validar el token de la persona. |
+| 443/tcp | salida | todos | servidor → `RESTAPI_TOKEN_URL` y `RESTAPI_BASE_URL` | Obtener el token de la API de datos y los datos de la persona. |
+| 443/tcp | salida | todos | servidor → registros de Docker y Maven | Descarga de imágenes y dependencias en la primera construcción. |
 
-## Datos generales
+**Sobre `CADDY_HTTP_PORT` (modo proxy).** Docker publica ese puerto en **todas las interfaces** del servidor, no solo en la que ve el proxy. Proteja el puerto de una de estas dos formas:
 
-Antes del deploy, se debe tener definida la siguiente información:
+- Con el **cortafuegos** del servidor o de la red, de modo que solo la dirección del proxy pueda llegar a `CADDY_HTTP_PORT`. Es la forma recomendada.
+- Si el proxy corre **en el mismo servidor**, haciendo que el puerto solo escuche en `127.0.0.1`: edite `docker-compose.proxy.yml` y cambie `"${CADDY_HTTP_PORT:-8080}:80"` por `"127.0.0.1:${CADDY_HTTP_PORT:-8080}:80"`. (El kit no trae esta variante como opción; es un cambio local suyo y hay que repetirlo cuando actualice el kit.)
 
-- Identificador único del emisor
-- Nombre de la institución
-- URL base de la API
-- Ejemplo de respuesta del servicio; los nombres de los campos deben coincidir con los atributos definidos en la configuración de la credencial (`credential_attributes`)
-- Scope de la credencial (`credential_scope`): usar el default del kit salvo que se necesite o quiera indicar otro
-- Client Id OAuth
-- Client Secret OAuth
+Nota: Docker escribe sus propias reglas en el cortafuegos del servidor, por lo que reglas hechas con `ufw` o equivalentes pueden no afectar a un puerto publicado por Docker. Compruebe desde otra máquina que el puerto realmente queda cerrado.
 
----
-
-## OAuth con Cuenta Única
-
-El Client ID OAuth es el identificador de la institución ante Cuenta Única: es cómo el sistema reconoce al emisor (el “usuario” de la aplicación). El Client Secret OAuth es la contraseña asociada a ese identificador. Certify los usa para autenticarse contra Cuenta Única (validar al ciudadano y pedir tokens).
-
-Los entrega OGTIC al registrar el cliente; la institución no los genera ni los registra por cuenta propia.
+El puerto interno de Certify (8090) no se publica nunca: Caddy lo alcanza por la red interna de Docker.
 
 ---
 
-## Configuración de la credencial a emitir
+## 2. Datos que debe tener definidos
 
-El deploy inserta automáticamente la configuración de la credencial. Para ello es necesario definir:
+### 2.1 Datos de la institución y de la API
 
-- id de la credencial — `credential_config_key_id`
-- lista de atributos de la credencial — `credential_attributes`
-- scope de la credencial — `credential_config.scope` (puede utilizarse el que viene por defecto en el `.env`)
+- **Identificador único del emisor** (`INSTITUTION_ID`). Úselo con letras, dígitos y guion bajo (`INTRANT`, `MIMARENA`): se usa para formar el nombre del tipo de credencial.
+- **Nombre de la institución** (`INSTITUTION_DISPLAY_NAME`): lo ve la persona en la billetera.
+- **URL base de la API** que entrega los datos de la persona (`RESTAPI_BASE_URL`), que le indica OGTIC.
+- **Un ejemplo de la respuesta de esa API.** Los nombres de los campos que quiera incluir en la credencial salen de ahí, con la regla de nombres de la sección 3.
 
-De forma opcional se deben indicar:
+### 2.2 Accesos que entrega OGTIC
 
-- Nombre que se va a mostrar en la wallet — `credential_display_name` (valor default: nombre de la institución)
-- `credential_format` (valor default: `ldp_vc`)
-- logo — `credential_logo_url` (default: logo genérico del kit)
-- color de background (default: color genérico del kit)
-- nombre de los atributos que se van a mostrar en la wallet (default: nombre técnico del campo)
-- URL DID (default: `did:web:host` derivado del `certify_public_url`)
+Hay **dos cosas distintas** que no deben confundirse. Las dos las entrega OGTIC y la institución no las crea por su cuenta.
+
+1. **El inicio de sesión de la persona: cliente de Cuenta Única de producción.**
+   Cuenta Única es el sistema con el que la persona se identifica antes de pedir su credencial. Para que su emisor participe, OGTIC registra un *cliente* de su institución en Cuenta Única **de producción** (`https://auth.cuentaunica.gob.do`). Ese cliente tiene un identificador y una clave:
+   - `OAUTH_CLIENT_ID`
+   - `OAUTH_CLIENT_SECRET`
+
+   Un cliente de pruebas o del entorno de staging **no sirve** en producción: el kit apunta a producción por defecto y rechaza los tokens de otro servidor.
+
+2. **El token de la API de datos: `RESTAPI_TOKEN_URL`.**
+   Para pedir a la API de la institución los datos de la persona, Certify necesita su propio token, que se obtiene en una dirección que entrega OGTIC: `RESTAPI_TOKEN_URL`. **No es** el token de la persona ni tiene que ver con Cuenta Única. No existe valor por defecto: sin ella, el kit no genera nada. Confírmela con OGTIC antes de instalar.
+
+Según la configuración del kit, el par `OAUTH_CLIENT_ID` y `OAUTH_CLIENT_SECRET` es también el que Certify presenta en `RESTAPI_TOKEN_URL` al pedir el token de la API de datos. Si OGTIC le entrega credenciales distintas para cada cosa, consúltelo antes de instalar.
+
+### 2.3 Credencial que va a emitir
+
+El kit carga solo la configuración de la credencial. Necesita:
+
+- **`CREDENTIAL_CONFIG_KEY_ID`**: nombre técnico de la credencial, por ejemplo `DriverLicenseCredential`. Acuérdelo con OGTIC. **Forma parte de la dirección pública de su contexto y de su logo**, por lo que cambiarlo después equivale a crear otra credencial.
+- **`CREDENTIAL_ATTRIBUTES`**: la lista de campos, separados por coma. Piénsela con cuidado: **una vez que emita credenciales, cambiar los atributos implica emitir de nuevo** (guía, sección 5).
+- **`CREDENTIAL_SCOPE`**: el permiso que debe traer el token de Cuenta Única para emitir esta credencial. Use el valor de la plantilla salvo que OGTIC indique otro.
+- **Un logo en formato PNG** (`LOGO_PATH`), **obligatorio**. Es la imagen de su institución en la tarjeta de la billetera.
+  - Debe ser un fichero PNG de verdad (el kit comprueba la cabecera del fichero; renombrar un JPG o un SVG a `.png` no sirve). Las billeteras no muestran logos SVG.
+  - Póngalo dentro de la carpeta del kit o indique una ruta completa. El kit lo copia y lo sirve en `https://<su dirección>/logos/<CREDENTIAL_CONFIG_KEY_ID>.png`. Ya no existe un logo por defecto ni la variable `CREDENTIAL_LOGO_URL`.
+  - No hay límite de tamaño comprobado: use una imagen ligera (unos pocos cientos de píxeles de lado).
+
+De forma opcional puede indicar: el nombre que se muestra en la billetera (`CREDENTIAL_DISPLAY_NAME`), los colores de la tarjeta, las etiquetas en español de cada atributo (`CREDENTIAL_LABELS_JSON`), el DID (`DID_URL`) y los tipos (`CREDENTIAL_TYPE`). Todas están descritas en la guía, sección 4.
 
 ---
 
-## DID y firma de la credencial
+## 3. Reglas para los nombres de los atributos
 
-El archivo `did.json` es el documento público del emisor. Ahí está la llave pública. Quien verifica una credencial (por ejemplo una wallet o Inji Verify) consulta ese archivo para comprobar que la credencial la firmó esa institución y que no fue modificada.
-
-La llave privada nunca se publica: queda en el servidor y Certify la usa para firmar cada credencial. En el primer arranque el kit genera un certificado (autofirmado) junto con esa llave. Más adelante la institución puede cargar un certificado propio (por ejemplo uno emitido por su autoridad certificadora) para que las credenciales se firmen con ese certificado en lugar del dummy.
+Los nombres de `CREDENTIAL_ATTRIBUTES` son nombres técnicos, no lo que ve la persona. Solo admiten **letras sin acento, dígitos y guion bajo**, sin espacios, sin `:` y sin empezar por un dígito: `numero_licencia`, `fullName`. Si la API de su institución devuelve campos con espacios, acentos o dos puntos (por ejemplo `Número de licencia`), hay que darles un nombre técnico válido; lo que verá la persona se define aparte con las etiquetas. La guía, sección 4.5, explica el porqué y los nombres que no se pueden usar.
 
 ---
 
-## Consideraciones OGTIC
+## 4. DID y firma de la credencial
 
-Hoy Certify y Mimoto tienen configuraciones que prenden/apagan algunas validaciones del token que se obtiene de Cuenta Única.
+El archivo `did.json` es el documento público de identidad del emisor. Contiene la **llave pública** con la que cualquiera (una billetera, un verificador) comprueba que una credencial la firmó esa institución y que no se modificó. La dirección lógica de ese documento se llama **DID**; en este kit tiene la forma `did:web:<su dirección pública>`.
 
-### Access Token del ciudadano
+La llave privada nunca se publica: queda en el servidor y Certify la usa para firmar. El kit crea la llave en el primer arranque, y el `did.json` se publica **después** de que Certify esté en marcha, porque lleva esa llave. Esto lo hace `install.sh` por usted.
 
-- claim `aud`: si se valida, tiene que incluir el audience del emisor.
-- claim `client_id`: si se valida, tiene que venir en el token.
-- `scope`: el valor exacto que emite debe ser el que está registrado en el scope de la credencial.
-- `c_nonce` / nonce: si se valida, Cuenta Única tiene que retornar el claim `c_nonce`, `c_nonce_expires_in` dentro del access token.
+Por el mismo motivo, **respalde el volumen del keystore de Certify y la base de datos** (guía, sección 12): si se pierden, el emisor tendría que crear llaves nuevas y las credenciales ya emitidas dejarían de verificarse.
+
+---
+
+## 5. Qué le pedirá OGTIC al final de la instalación
+
+Instalar el emisor no basta: OGTIC debe registrarlo en la plataforma central de billeteras. Al terminar, `install.sh` imprime estos datos para que usted se los envíe:
+
+| Dato | Ejemplo |
+|---|---|
+| `INSTITUTION_ID` | `INTRANT` |
+| `CERTIFY_PUBLIC_URL` | `https://certify.institucion.gob.do` |
+| `OAUTH_CLIENT_ID` | el que le entregó OGTIC |
+| `CREDENTIAL_CONFIG_KEY_ID` | `DriverLicenseCredential` |
+| Nombre visible de la credencial | `INTRANT` |
+
+No envíe nunca el `OAUTH_CLIENT_SECRET` ni las contraseñas. Además, las direcciones `<su dirección>/.well-known/openid-credential-issuer` y `<su dirección>/.well-known/did.json` deben responder desde internet; `install.sh` las imprime junto con los datos de arriba.
+
+---
+
+## 6. Consideraciones de seguridad para su equipo
+
+Hoy Certify y la plataforma central tienen validaciones del token de Cuenta Única que están **relajadas** de fábrica (audiencia, `client_id` y `c_nonce`). Qué relaja cada una, el riesgo y cómo endurecerla está en [`IUGO-CUSTOMIZATIONS.md`](./IUGO-CUSTOMIZATIONS.md). Pruebe siempre una emisión real de principio a fin antes de cambiarlas.
+
+Lo que sí se valida siempre: la firma del token contra las llaves públicas de Cuenta Única, el emisor del token, que exista el sujeto, las fechas y que el permiso (`scope`) coincida con el de la credencial.

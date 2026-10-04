@@ -1,8 +1,12 @@
 # Personalizaciones de IUGO que el kit hereda del fork de Certify
 
-El kit configura Certify con tres validaciones **relajadas** y con un nivel de registro **fijado**. Vienen del fork de IUGO (`docs/IUGO-CUSTOMIZATIONS.md` en la raíz del repositorio, que explica el origen) y están escritas en `templates/certify-default.properties.tpl`. Este documento dice, para cada una, **qué relaja, por qué, qué riesgo deja y cómo endurecerla**. Es la referencia que cita ese fichero.
+**Para quién es este documento.** Para el equipo de seguridad y de infraestructura de la institución. **No hace falta hacer nada** con él para instalar: el kit ya viene configurado así. Sirve para saber qué validaciones del token de acceso están relajadas, qué riesgo dejan y cómo endurecerlas, y qué hace el kit para que el token no quede escrito en los registros. Vuelva a la [guía de instalación](./02-GUIA-DE-INSTALACION.md) o a los [prerrequisitos](./01-PREREQUISITOS.md) cuando termine.
 
-**No las cambie sin probar la emisión con Cuenta Única de extremo a extremo**: un valor `true` que no case con los tokens reales rechaza a todos los ciudadanos con un error que no se parece a un problema de configuración.
+**Vocabulario.** Cuando una persona pide su credencial, la billetera presenta a Certify un **token de acceso** que emitió Cuenta Única: un documento firmado que dice quién es la persona y qué permiso tiene. Certify lo valida antes de entregar nada. El token trae campos llamados *claims* (`aud`: a quién va dirigido; `client_id`: qué aplicación lo pidió; `scope`: el permiso). La billetera acompaña su petición con un **proof**: una prueba firmada con la llave de la persona, que incluye un número de un solo uso (`c_nonce`) para que no se pueda repetir. El `jwks` es el conjunto de llaves públicas de Cuenta Única con el que Certify comprueba la firma del token.
+
+El kit configura Certify con tres validaciones **relajadas** y con un nivel de registro **fijado**. Vienen del fork de IUGO (el documento `docs/IUGO-CUSTOMIZATIONS.md` de la raíz del repositorio explica su origen) y están escritas en `templates/certify-default.properties.tpl`. Este documento dice, para cada una, **qué relaja, por qué, qué riesgo deja y cómo endurecerla**. Es la referencia que cita ese fichero.
+
+**No las cambie sin probar la emisión con Cuenta Única de extremo a extremo**: un valor `true` que no case con los tokens reales rechaza a todas las personas con un error que no se parece a un problema de configuración. Antes de endurecer cualquiera, coordine con OGTIC.
 
 ## Resumen
 
@@ -12,7 +16,7 @@ El kit configura Certify con tres validaciones **relajadas** y con un nivel de r
 | `mosip.certify.authn.require-client-id-claim` | `false` | `false` | El token debe traer la claim `client_id` |
 | `mosip.certify.issuance.validate-cnonce` | `false` | `false` | Se valida el `c_nonce` y el nonce del *proof* JWT |
 
-El emisor propio de OGTIC (`inji-vc/stack/config/certify-soyyord.properties`) **no fija ninguna de las tres**: corre en producción con el valor por defecto del código, que es `false`. El kit las escribe de forma explícita para que sea visible, pero el comportamiento es el mismo.
+El emisor que OGTIC opera en producción **no fija ninguna de las tres**: corre con el valor por defecto del código, que es `false`. El kit las escribe de forma explícita para que sea visible, pero el comportamiento es el mismo.
 
 Lo que **sí** se valida siempre, con estas tres en `false`: la firma del token contra el `jwks` de Cuenta Única, el emisor (`iss`, igualdad exacta con `AUTH_ISSUER_URL`), que `sub` exista, y las fechas (`iat` pasado, `exp` futuro). Además, el `scope` del token se compara con el de la configuración de la credencial.
 
@@ -48,8 +52,16 @@ Lo que **sí** se valida siempre, con estas tres en `false`: la firma del token 
 
 ## Registro (logs) del filtro del token
 
-**Qué pasa.** El commit `541f1d9` («add token logs», 15-sep-2026) añadió en `AccessTokenValidationFilter` tres `log.info` que escriben el **token de acceso completo**, todas sus claims y la claim `ext` en cada petición al endpoint de credencial. Es un dato personal y una credencial al portador. (El documento del fork lo lista como «descartado a propósito»; el commit lo reintrodujo.) Incidente: `inji-vc/docs/incidentes/2026-10-04-tokens-de-acceso-en-logs-de-certify.md`.
+**Qué pasa.** El commit `541f1d9` («add token logs», 15-sep-2026) añadió en `AccessTokenValidationFilter` tres `log.info` que escriben el **token de acceso completo**, todas sus claims y la claim `ext` en cada petición al endpoint de credencial. Es un dato personal y una credencial al portador. (El documento del fork lo lista como «descartado a propósito»; el commit lo reintrodujo.) OGTIC lo tiene registrado como un incidente de seguridad.
 
-**Qué hace el kit** (defensa en profundidad, solo configuración): `logging.level.io.mosip.certify.filter=WARN` en las properties **y** `templates/logback-kit.xml` (montado y referenciado por `LOGGING_CONFIG` en `docker-compose.yml`) con el logger `io.mosip.certify.filter` en `WARN`. El XML existe porque varias dependencias de MOSIP traen su propio `logback.xml` en el jar y el emisor propio comprobó que, con eso, Spring ignora `logging.file.name`; para `logging.level` no se midió, así que se fijó el nivel donde manda en cualquier caso.
+**Qué hace el kit** (defensa en profundidad, solo configuración): `logging.level.io.mosip.certify.filter=WARN` en las properties **y** `templates/logback-kit.xml` (montado y referenciado por `LOGGING_CONFIG` en `docker-compose.yml`) con el logger `io.mosip.certify.filter` en `WARN`. El XML existe porque varias dependencias de MOSIP traen su propio `logback.xml` en el jar y en el emisor de OGTIC se comprobó que, con eso, Spring ignora `logging.file.name`; para `logging.level` no se midió, así que se fijó el nivel donde manda en cualquier caso.
 
-**Qué NO hace.** No borra las líneas del fuente de Java: eso es una corrección del código del fork (revertir `541f1d9`), decisión aparte con IUGO. Mientras esas líneas existan, un cambio de nivel o de configuración las vuelve a activar. Los servidores que ya construyeron Certify desde esa rama tienen tokens en sus logs: purgarlos y revisar quién tiene acceso.
+**Cómo comprobar su servidor.** Desde `institution-kit/`, cuente cuántas veces aparece la línea del token en los registros de Certify; con la configuración del kit debería dar `0` (su efecto sobre un Certify real todavía está por medirse, así que no lo dé por supuesto):
+
+```bash
+docker compose $(cat generated/compose-args) logs certify | grep -c "Raw access token"
+```
+
+Si da un número mayor que cero, los registros ya contienen tokens (de una versión anterior, o de una configuración de registro cambiada).
+
+**Qué NO hace.** No borra las líneas del fuente de Java: eso es una corrección del código del fork (revertir `541f1d9`), decisión que toman OGTIC e IUGO. Mientras esas líneas existan, un cambio de nivel o de configuración las vuelve a activar. Los servidores que ya construyeron Certify desde esa rama pueden tener tokens en sus registros: revíselos, purgue los que los contengan y revise quién tiene acceso a ellos.
