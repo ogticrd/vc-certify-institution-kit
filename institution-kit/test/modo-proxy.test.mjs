@@ -58,9 +58,10 @@ describe("TLS_MODE=proxy · CERTIFY_PUBLIC_URL obligatorio (R6)", () => {
     });
   }
 
+  // T8 (K15): http://localhost y http://127.0.0.1 solo se aceptan con KIT_PERMITIR_HTTP=1 (entradas-y-ejecucion.test.mjs).
   for (const v of ["https://certify.prueba.invalid", "https://certify.prueba.invalid:8443", "http://localhost:8080", "http://127.0.0.1"]) {
     test(`CERTIFY_PUBLIC_URL=${v} se acepta`, () => {
-      const e = proxy({ CERTIFY_PUBLIC_URL: v });
+      const e = proxy({ CERTIFY_PUBLIC_URL: v, ...(v.startsWith("http:") ? { KIT_PERMITIR_HTTP: "1" } : {}) });
       try {
         assert.equal(e.salida.status, 0, e.salida.stderr);
         assert.match(e.leer("runtime"), new RegExp(`^CERTIFY_PUBLIC_URL=${v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));

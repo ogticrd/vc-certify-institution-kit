@@ -20,7 +20,8 @@ validate_logo_path   # define LOGO_PATH_RESOLVED; sale con un error claro si fal
 DESTINO="${GENERATED_DIR}/logos"
 ensure_generated_dir
 mkdir -p "${DESTINO}"
-# Un logo viejo de otra clave no se sirve: solo hay un PNG por clave y se reescribe cada vez.
+# Solo se reescribe el PNG de ESTA clave. Los de otras claves se conservan a propósito: las credenciales ya
+# emitidas con una clave anterior siguen apuntando a su logo (display.logo.url) y la carpeta se va acumulando.
 cp "${LOGO_PATH_RESOLVED}" "${DESTINO}/${CREDENTIAL_CONFIG_KEY_ID}.png"
 chmod 644 "${DESTINO}/${CREDENTIAL_CONFIG_KEY_ID}.png"
 echo "Logo copiado a ${DESTINO}/${CREDENTIAL_CONFIG_KEY_ID}.png"

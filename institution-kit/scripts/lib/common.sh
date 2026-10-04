@@ -15,6 +15,20 @@ load_env() {
     exit 1
   fi
   aviso_permisos_env
+  # El .env se ejecuta con `source`: cualquier línea es código de shell. Dos errores de formato comunes se
+  # detectan antes con un mensaje que dice qué hacer (K15):
+  #  - finales de línea de Windows (CRLF): la «\r» se queda pegada al valor («TLS_MODE … actual: domain\r»);
+  #  - un valor con espacios sin comillas (INSTITUTION_DISPLAY_NAME=Instituto Nacional): «Nacional: command not found».
+  if grep -q $'\r$' "${ENV_FILE}"; then
+    echo "ERROR: ${ENV_FILE} tiene finales de línea de Windows (CRLF). Conviértalo: sed -i 's/\r\$//' ${ENV_FILE}  (o dos2unix ${ENV_FILE})." >&2
+    exit 1
+  fi
+  local errores
+  if ! errores="$( (set -e; source "${ENV_FILE}") 2>&1 >/dev/null )"; then
+    echo "ERROR: no se pudo leer ${ENV_FILE}: ${errores##*$'\n'}" >&2
+    echo "       Los valores con espacios o caracteres especiales van entre comillas: INSTITUTION_DISPLAY_NAME=\"Instituto Nacional de Prueba\"" >&2
+    exit 1
+  fi
   # shellcheck disable=SC1090
   set -a
   source "${ENV_FILE}"
@@ -139,7 +153,7 @@ caddy_valor_seguro() {
 }
 
 # CERTIFY_PUBLIC_URL en modo proxy: https://<host>[:puerto], sin ruta ni barra final. (http solo para
-# localhost / 127.0.0.1, pruebas locales: es lo mismo que admite scripts/lib/credencial.mjs.)
+# localhost / 127.0.0.1 con KIT_PERMITIR_HTTP=1, pruebas locales: es lo mismo que admite scripts/lib/credencial.mjs.)
 validate_proxy_public_url() {
   local u="${CERTIFY_PUBLIC_URL}"
   local https_re='^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$'
@@ -152,7 +166,15 @@ validate_proxy_public_url() {
     echo "ERROR: CERTIFY_PUBLIC_URL debe estar en minúsculas (valor: $(_citar "${u}")): el DID y el contexto usan el nombre en minúsculas y la URL pública tendría otra identidad." >&2
     exit 1
   fi
-  if ! [[ "${u}" =~ ${https_re} || "${u}" =~ ${local_re} ]]; then
+  if [[ "${u}" =~ ${local_re} ]]; then
+    # K15: http://localhost solo para pruebas locales y solo si se pide expresamente. El motor de verificación
+    # exige https: con http, verify-install.sh falla al final de una instalación que ya construyó y levantó todo.
+    if [[ "${KIT_PERMITIR_HTTP:-}" != "1" ]]; then
+      echo "ERROR: CERTIFY_PUBLIC_URL=${u} usa http: un emisor real necesita https (lo termina su proxy). Solo para pruebas locales, con KIT_PERMITIR_HTTP=1; aun así verify-install.sh no podrá pasar, porque el diagnóstico de OGTIC solo habla https." >&2
+      exit 1
+    fi
+    echo "AVISO: CERTIFY_PUBLIC_URL usa http (KIT_PERMITIR_HTTP=1): solo para pruebas locales; verify-install.sh fallará (el diagnóstico exige https)." >&2
+  elif ! [[ "${u}" =~ ${https_re} ]]; then
     echo "ERROR: CERTIFY_PUBLIC_URL debe ser https://<dominio público> sin ruta ni espacios (valor: $(_citar "${u}"))." >&2
     exit 1
   fi
@@ -175,6 +197,13 @@ apply_defaults() {
   # El orden en que se escriben tipos y contextos en la base de datos lo fija
   # scripts/lib/credencial.mjs (como Collections.sort de Java); aquí solo el valor por defecto.
   # El contexto ya no es una entrada: lo genera el kit (scripts/generate-context.mjs).
+  # T7-4: se anota si el tipo salió del defecto, para que el error de un INSTITUTION_ID con guion nombre
+  # INSTITUTION_ID (y no CREDENTIAL_TYPE, que la institución no escribió).
+  # (Solo la primera vez: un script hijo hereda CREDENTIAL_TYPE ya con el defecto puesto por el padre.)
+  if [[ -z "${CREDENTIAL_TYPE_ES_DEFECTO+x}" ]]; then
+    if [[ -z "${CREDENTIAL_TYPE:-}" ]]; then CREDENTIAL_TYPE_ES_DEFECTO=1; else CREDENTIAL_TYPE_ES_DEFECTO=""; fi
+  fi
+  export CREDENTIAL_TYPE_ES_DEFECTO
   CREDENTIAL_TYPE="${CREDENTIAL_TYPE:-VerifiableCredential,${INSTITUTION_ID}Credential}"
   CREDENTIAL_FORMAT="${CREDENTIAL_FORMAT:-ldp_vc}"
   CREDENTIAL_BG_COLOR="${CREDENTIAL_BG_COLOR:-#12107c}"
@@ -484,8 +513,8 @@ validate_env() {
     exit 1
   fi
   if [[ "${TLS_MODE:-}" == "proxy" ]]; then
-    if ! [[ "${CADDY_HTTP_PORT}" =~ ^[0-9]{1,5}$ ]] || (( 10#${CADDY_HTTP_PORT} < 1 || 10#${CADDY_HTTP_PORT} > 65535 )); then
-      echo "ERROR: CADDY_HTTP_PORT debe ser un puerto entre 1 y 65535 (valor: ${CADDY_HTTP_PORT})." >&2
+    if ! [[ "${CADDY_HTTP_PORT}" =~ ^[1-9][0-9]{0,4}$ ]] || (( 10#${CADDY_HTTP_PORT} > 65535 )); then
+      echo "ERROR: CADDY_HTTP_PORT debe ser un puerto entre 1 y 65535, sin ceros a la izquierda (valor: ${CADDY_HTTP_PORT})." >&2
       exit 1
     fi
     # TRUSTED_PROXIES va al Caddyfile: solo `private_ranges` o direcciones/CIDR separadas por espacio.
@@ -493,6 +522,14 @@ validate_env() {
     for tp in ${TRUSTED_PROXIES}; do
       if ! [[ "${tp}" == "private_ranges" || "${tp}" =~ ^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$ ]]; then
         echo "ERROR: TRUSTED_PROXIES solo admite «private_ranges» o IP/CIDR separadas por espacios (valor no válido: ${tp})." >&2
+        exit 1
+      fi
+    done
+    for tp in ${TRUSTED_PROXIES}; do
+      # K15: 0.0.0.0/0, ::/0 (o 0.0.0.0, ::) confían en CUALQUIER origen: cualquiera de internet fijaría su
+      # X-Forwarded-For y client_ip dejaría de distinguir quién es interno (el health del actuator quedaría público).
+      if [[ "${tp}" == */0 || "${tp}" == "0.0.0.0" || "${tp}" == "::" ]]; then
+        echo "ERROR: TRUSTED_PROXIES=${tp} confía en cualquier origen: cualquier cliente podría fijar su X-Forwarded-For y hacerse pasar por una IP interna. Ponga la IP o la red de SU proxy (p. ej. 10.0.0.5 o 10.0.0.0/24) o deje private_ranges." >&2
         exit 1
       fi
     done
@@ -667,15 +704,19 @@ NODE_ENV_VARS=(
   CREDENTIAL_CONFIG_KEY_ID CREDENTIAL_ATTRIBUTES CREDENTIAL_TYPE CREDENTIAL_LABELS_JSON
   CREDENTIAL_ATTRIBUTE_LABELS CREDENTIAL_DISPLAY_NAME CREDENTIAL_BG_COLOR
   CREDENTIAL_TEXT_COLOR CREDENTIAL_SCOPE CREDENTIAL_FORMAT CERTIFY_PUBLIC_URL DID_URL
-  INSTITUTION_ID INSTITUTION_DISPLAY_NAME KIT_FORZAR_CONTEXTO
+  INSTITUTION_ID INSTITUTION_DISPLAY_NAME KIT_FORZAR_CONTEXTO CREDENTIAL_TYPE_ES_DEFECTO
 )
 NODE_IMAGE="${NODE_IMAGE:-node:22-alpine}"
 
 # Ejecuta un programa de scripts/ con Node, sin exigir Node en el servidor: usa `node` si existe
-# y, si no, `docker run` con la imagen ${NODE_IMAGE} y el kit montado en /kit. Con
-# KIT_FORCE_DOCKER=1 usa siempre el contenedor; con KIT_DRY_RUN=1 imprime el comando en vez de
-# ejecutarlo. Los ficheros salen con el usuario de quien lo corre (no root).
+# y, si no, `docker run` con la imagen ${NODE_IMAGE}. Con KIT_FORCE_DOCKER=1 usa siempre el
+# contenedor; con KIT_DRY_RUN=1 imprime el comando en vez de ejecutarlo. Los ficheros salen con el
+# usuario de quien lo corre (no root).
 #   run_node generate-context.mjs [argumentos…]
+#
+# K12: en el contenedor NO se monta el kit entero (veía .env y generated/.env.runtime, con secretos, en
+# lectura-escritura): solo scripts/ de solo lectura y lo que cada programa ESCRIBE —contextos: la carpeta
+# generated/contextos; SQL y muestra: esos dos ficheros—. Un programa que no está en la lista se rechaza.
 run_node() {
   local programa="$1"; shift
   local cmd
@@ -687,7 +728,25 @@ run_node() {
       echo "ERROR: hace falta Node 18+ o Docker para generar la credencial (no se encontró ninguno)." >&2
       return 1
     }
-    cmd=(docker run --rm --user "$(id -u):$(id -g)" -v "${KIT_DIR}:/kit" -w /kit)
+    local montajes=() f ro=""
+    case "${programa}" in
+      generate-context.mjs)
+        # Con --comprobar (DRY_RUN) no escribe nada: solo lectura.
+        [[ " $* " == *" --comprobar "* ]] && ro=":ro"
+        ensure_generated_dir
+        mkdir -p "${GENERATED_DIR}/contextos"
+        montajes=(-v "${GENERATED_DIR}/contextos:/kit/generated/contextos${ro}")
+        ;;
+      generate-credential.mjs)
+        ensure_generated_dir
+        for f in credential_config.sql credencial-muestra.json; do
+          [[ -e "${GENERATED_DIR}/${f}" ]] || : > "${GENERATED_DIR}/${f}"  # un fichero que no existe no se puede montar
+          montajes+=(-v "${GENERATED_DIR}/${f}:/kit/generated/${f}")
+        done
+        ;;
+      *) echo "ERROR: run_node: programa desconocido «${programa}» (no se sabe qué montar)." >&2; return 1 ;;
+    esac
+    cmd=(docker run --rm --user "$(id -u):$(id -g)" -v "${KIT_DIR}/scripts:/kit/scripts:ro" "${montajes[@]}" -w /kit)
     local v
     for v in "${NODE_ENV_VARS[@]}"; do cmd+=(-e "${v}"); done
     cmd+=("${NODE_IMAGE}" node "/kit/scripts/${programa}" "$@")

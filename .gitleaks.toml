@@ -1,0 +1,18 @@
+# Allowlist del escáner de secretos (gitleaks) de ESTE repositorio. El resto del repositorio se escanea normal.
+#
+# institution-kit/test/fixtures/tls/*.key y *.pem: certificados y claves privadas AUTOFIRMADOS y de mentira (ver
+# institution-kit/test/helpers/PROCEDENCIA.md), copiados del emisor de pruebas del stack de OGTIC. Solo los usan las
+# pruebas del kit para servir https en 127.0.0.1; no protegen nada ni pertenecen a ningún servidor real, y no se
+# generan en cada prueba porque la procedencia (huellas SHA-256 en test/procedencia.test.mjs) exige que sean
+# exactamente estos ficheros. Un escáner los marcaría como «clave privada»: esta allowlist lo evita para esa carpeta
+# y para nada más.
+title = "vc-certify-institution-kit"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Claves TLS autofirmadas y de mentira de las pruebas del kit de instituciones"
+paths = [
+  '''institution-kit/test/fixtures/tls/.*''',
+]

@@ -127,6 +127,14 @@ export function leerEntrada(env, { paraSql = false } = {}) {
   // más al menos un tipo propio, que es por el que la app y Certify resuelven la credencial.
   const institucion = String(env.INSTITUTION_ID ?? "").trim();
   const tipoPorDefecto = `VerifiableCredential,${institucion}Credential`;
+  // T7-4: si el tipo sale del defecto (no hay CREDENTIAL_TYPE), el error tiene que nombrar INSTITUTION_ID y no
+  // «CREDENTIAL_TYPE», que la institución no ha escrito.
+  const hayTipo = Boolean(env.CREDENTIAL_TYPE && String(env.CREDENTIAL_TYPE).trim()) && env.CREDENTIAL_TYPE_ES_DEFECTO !== "1";
+  if (!hayTipo && !NOMBRE.test(`${institucion}Credential`)) {
+    falla(`INSTITUTION_ID «${institucion}» no es válido: de él sale el tipo de la credencial («${institucion}Credential»), así que solo admite `
+      + `letras sin acento, dígitos y «_», sin empezar por dígito (nada de guiones, espacios, puntos ni acentos). `
+      + `Ejemplo: mi_institucion. (O defina CREDENTIAL_TYPE=VerifiableCredential,MiTipo y deje INSTITUTION_ID como esté.)`);
+  }
   const tiposEntrada = lista(env.CREDENTIAL_TYPE && String(env.CREDENTIAL_TYPE).trim() ? env.CREDENTIAL_TYPE : tipoPorDefecto, "CREDENTIAL_TYPE");
   const propios = [...new Set(tiposEntrada.filter((t) => t !== "VerifiableCredential"))];
   if (propios.length === 0) falla("CREDENTIAL_TYPE necesita al menos un tipo propio además de VerifiableCredential (o INSTITUTION_ID para el de por defecto).");

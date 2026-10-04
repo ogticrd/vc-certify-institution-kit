@@ -476,14 +476,17 @@ describe("scripts: sintaxis y modo de prueba sin ejecutar nada", () => {
     } finally { e.limpiar(); }
   });
 
-  test("sin Node local (KIT_FORCE_DOCKER=1) el generador se ejecuta con docker run node:22-alpine y el kit montado", () => {
+  test("sin Node local (KIT_FORCE_DOCKER=1) el generador se ejecuta con docker run node:22-alpine y solo lo necesario montado (K12)", () => {
     const e = prepararEntorno({ runtime: false, generar: false });
     try {
       const r = e.ejecutar('bash "$PWD/scripts/generate-context.sh"', { KIT_FORCE_DOCKER: "1", KIT_DRY_RUN: "1" });
       assert.equal(r.status, 0, r.stderr);
       const linea = r.stdout.split("\n").find((l) => l.startsWith("docker run"));
       assert.ok(linea, r.stdout);
-      assert.match(linea, new RegExp(`^docker run --rm --user [0-9]+:[0-9]+ -v ${realpathSync(e.kit).replace(/[.*+?^${}()|[\]\\]/g, "\\\\$&")}:/kit -w /kit `));
+      const kit = realpathSync(e.kit).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // T8 (K12): antes `-v <kit>:/kit` (el kit entero, con .env y .env.runtime, en lectura-escritura); ahora scripts/
+      // de solo lectura y la carpeta de contextos. El detalle está en entradas-y-ejecucion.test.mjs.
+      assert.match(linea, new RegExp(`^docker run --rm --user [0-9]+:[0-9]+ -v ${kit}/scripts:/kit/scripts:ro -v ${kit}/generated/contextos:/kit/generated/contextos -w /kit `));
       for (const v of ["CREDENTIAL_CONFIG_KEY_ID", "CREDENTIAL_ATTRIBUTES", "CERTIFY_PUBLIC_URL", "CREDENTIAL_LABELS_JSON"]) {
         assert.match(linea, new RegExp(`-e ${v}\\b`));
       }

@@ -113,6 +113,16 @@ fi
 codigo=0
 "${cmd[@]}" || codigo=$?
 
+# T7-6 / K10: qué mirar cuando falla la comprobación 1 (la metadata no responde) según el modo.
+if [[ "${codigo}" -ne 0 ]]; then
+  case "${TLS_MODE}" in
+    proxy)
+      echo "Modo proxy: la verificación pide ${METADATA_URL} desde ESTE servidor. Si falla la comprobación 1 (no responde): ¿su proxy ya reenvía a este servidor? Debe enviar ${CERTIFY_PUBLIC_URL} al puerto ${CADDY_HTTP_PORT} de este servidor, con X-Forwarded-For. Hasta que lo haga, esta verificación no puede pasar; repita ./scripts/verify-install.sh cuando esté configurado." >&2 ;;
+    *)
+      echo "Si falla la comprobación 1 justo después de instalar: Caddy puede tardar un minuto en obtener el certificado de Let's Encrypt (el DNS debe apuntar a este servidor y el puerto 80 estar abierto). Espere y repita ./scripts/verify-install.sh." >&2 ;;
+  esac
+fi
+
 if [[ "${FALLO_SALUD}" -eq 1 ]]; then
   echo ""
   echo "Resultado global: la verificación FALLÓ (Certify no respondió UP)." >&2
