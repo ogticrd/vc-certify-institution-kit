@@ -9,7 +9,7 @@ COPY certify-core/pom.xml certify-core/
 COPY certify-integration-api/pom.xml certify-integration-api/
 COPY certify-service/pom.xml certify-service/
 
-RUN mvn -pl certify-service -am dependency:go-offline -DskipTests -Dmaven.gitcommitid.skip=true -q || true
+RUN mvn -pl certify-service -am dependency:resolve -DincludeScope=runtime -DskipTests -Dmaven.gitcommitid.skip=true -q
 
 COPY certify-core certify-core
 COPY certify-integration-api certify-integration-api
