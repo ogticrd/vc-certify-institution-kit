@@ -33,6 +33,8 @@ if ! command -v envsubst >/dev/null 2>&1; then
   exit 1
 fi
 require_cmd openssl
+# iconv escribe los acentos del nombre de la institución como \uXXXX en las properties (K4).
+require_cmd iconv
 docker compose version >/dev/null 2>&1 || { echo "ERROR: Docker Compose v2 requerido (docker compose)" >&2; exit 1; }
 
 if [[ ! -f "${ENV_FILE}" ]]; then

@@ -393,7 +393,7 @@ describe("install.sh · comprobación de envsubst (hallazgo 3 de T1)", () => {
         const ruta = execFileSync("sh", ["-c", `command -v ${c}`], { encoding: "utf8" }).trim();
         symlinkSync(ruta, join(bin, c));
       }
-      for (const c of ["docker", "curl", "jq", "openssl"]) {
+      for (const c of ["docker", "curl", "jq", "openssl", "iconv"]) {
         writeFileSync(join(bin, c), "#!/bin/sh\nexit 0\n"); chmodSync(join(bin, c), 0o755);
       }
       const r = e.ejecutar('bash "$PWD/install.sh"', { PATH: bin });

@@ -99,7 +99,7 @@ describe("K2 · instalación nueva: se generan; instalación previa: nunca se re
       const d = dockerFalso(e);
       const bin = join(e.raiz, "bin");
       mkdirSync(bin);
-      for (const c of ["bash", "dirname", "env", "cat", "cp", "chmod", "stat", "grep", "tr", "cut", "head", "mkdir", "mktemp", "mv", "rm", "id", "uname", "ls", "sed", "od", "envsubst", "openssl", "jq", "curl", "sleep", "awk"]) {
+      for (const c of ["bash", "dirname", "env", "cat", "cp", "chmod", "stat", "grep", "tr", "cut", "head", "mkdir", "mktemp", "mv", "rm", "id", "uname", "ls", "sed", "od", "envsubst", "openssl", "jq", "curl", "sleep", "awk", "iconv", "od"]) {
         try { symlinkSync(execFileSync("sh", ["-c", `command -v ${c}`], { encoding: "utf8" }).trim(), join(bin, c)); } catch { /* opcional */ }
       }
       symlinkSync(join(e.raiz, "bin-docker", "docker"), join(bin, "docker"));

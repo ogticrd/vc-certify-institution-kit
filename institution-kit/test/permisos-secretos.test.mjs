@@ -128,7 +128,7 @@ describe("K1/K12 · el .env (OAUTH_CLIENT_SECRET, contraseñas)", () => {
       for (const c of ["bash", "dirname", "env", "cat", "cp", "chmod", "stat", "grep", "tr", "cut", "head", "mkdir", "mktemp", "mv", "rm", "id", "uname", "ls", "sed"]) {
         try { symlinkSync(execFileSync("sh", ["-c", `command -v ${c}`], { encoding: "utf8" }).trim(), join(bin, c)); } catch { /* opcional */ }
       }
-      for (const c of ["docker", "curl", "jq", "openssl", "envsubst"]) { writeFileSync(join(bin, c), "#!/bin/sh\nexit 0\n"); chmodSync(join(bin, c), 0o755); }
+      for (const c of ["docker", "curl", "jq", "openssl", "envsubst", "iconv"]) { writeFileSync(join(bin, c), "#!/bin/sh\nexit 0\n"); chmodSync(join(bin, c), 0o755); }
       const r = e.ejecutar('umask 022; bash "$PWD/install.sh"', { PATH: bin });
       assert.notEqual(r.status, 0, "sale con 1 pidiendo completar el .env");
       assert.ok(existsSync(join(e.kit, ".env")), r.stderr + r.stdout);

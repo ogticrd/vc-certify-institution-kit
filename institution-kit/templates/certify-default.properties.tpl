@@ -205,9 +205,11 @@ mosip.certify.signature-algo.key-alias-mapper={\
     'ES256K': {{'CERTIFY_VC_SIGN_EC_K1', 'EC_SECP256K1_SIGN'}},\
     'ES256': {{'CERTIFY_VC_SIGN_EC_R1', 'EC_SECP256R1_SIGN'}}\
 }
+# El nombre llega ya escapado como literal SpEL dentro de un .properties (K4): «'» duplicada y los caracteres no
+# ASCII como \uXXXX, porque Java lee este fichero como ISO-8859-1 (common.sh, spel_properties_literal).
 mosip.certify.credential-config.issuer.display={\
   {\
-    'name': '${INSTITUTION_DISPLAY_NAME}',\
+    'name': '${INSTITUTION_DISPLAY_NAME_PROP}',\
     'locale': 'es'\
   }\
 }

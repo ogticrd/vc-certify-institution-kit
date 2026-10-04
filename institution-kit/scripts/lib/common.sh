@@ -379,9 +379,49 @@ validate_env() {
     done
   fi
   validate_logo_path
+  validate_display_name
   # T7-3: los secretos se resuelven solo cuando todo lo demás es válido; un .env incorrecto no deja
   # contraseñas nuevas en generated/.env.runtime.
   resolve_secrets
+}
+
+# K4: INSTITUTION_DISPLAY_NAME va dentro del mapa SpEL de `credential-config.issuer.display` de las properties
+# (`{{ 'name': '…', 'locale': 'es' }}`). Dos riesgos medidos: (1) Java y Spring Boot leen los .properties como
+# ISO-8859-1: un acento escrito en UTF-8 sale como «DirecciÃ³n»; (2) una comilla simple cierra el literal SpEL
+# y Certify no arranca. Se escribe, pues, como literal de SpEL dentro de un .properties: la «'» duplicada (`''`),
+# todo lo no ASCII como \uXXXX (unidades UTF-16, con pares sustitutos) y se RECHAZA lo que no se puede escapar con
+# seguridad (la barra invertida, `$` y las llaves, que Spring o SpEL interpretarían, y los caracteres de control).
+# Imprime el literal (sin las comillas exteriores). Necesita `iconv` (POSIX; viene con Linux y macOS).
+spel_properties_literal() {
+  local texto="$1" hex u out="" ascii
+  command -v iconv >/dev/null 2>&1 || { echo "ERROR: hace falta iconv para escribir INSTITUTION_DISPLAY_NAME en las properties (paquete libc-bin/glibc; viene con Linux y macOS)." >&2; return 1; }
+  if ! printf '%s' "${texto}" | iconv -f UTF-8 -t UTF-16BE >/dev/null 2>&1; then
+    echo "ERROR: INSTITUTION_DISPLAY_NAME no es UTF-8 válido: guarde el .env en UTF-8." >&2
+    return 1
+  fi
+  hex="$(printf '%s' "${texto}" | iconv -f UTF-8 -t UTF-16BE | od -An -v -tx1 | tr -d ' \n')"
+  while [[ -n "${hex}" ]]; do
+    u="${hex:0:4}"
+    hex="${hex:4}"
+    if [[ "${u}" == "0027" ]]; then
+      out+="''"
+    elif [[ "${u:0:2}" == "00" ]] && (( 16#${u:2:2} >= 32 && 16#${u:2:2} < 127 )); then
+      ascii="$(printf "\\x${u:2:2}")"
+      out+="${ascii}"
+    else
+      out+="\\u$(printf '%s' "${u}" | tr '[:lower:]' '[:upper:]')"
+    fi
+  done
+  printf '%s' "${out}"
+}
+
+validate_display_name() {
+  if [[ "${INSTITUTION_DISPLAY_NAME}" == *[\\\$\{\}]* || "${INSTITUTION_DISPLAY_NAME}" =~ [[:cntrl:]] ]]; then
+    echo "ERROR: INSTITUTION_DISPLAY_NAME no puede llevar «\\», «\$», «{», «}» ni saltos de línea o tabuladores: acaban en las properties de Certify, donde Spring los interpretaría (valor: ${INSTITUTION_DISPLAY_NAME//[[:cntrl:]]/ }). Acentos y la comilla simple sí se admiten." >&2
+    exit 1
+  fi
+  INSTITUTION_DISPLAY_NAME_PROP="$(spel_properties_literal "${INSTITUTION_DISPLAY_NAME}")" || exit 1
+  export INSTITUTION_DISPLAY_NAME_PROP
 }
 
 # El logo de la credencial (R10): LOGO_PATH es obligatorio y tiene que ser un PNG. Una ruta relativa
