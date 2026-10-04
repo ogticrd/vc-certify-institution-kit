@@ -63,7 +63,8 @@ else
   # el fichero que ESTE script escribe, así que el respaldo se leería a sí mismo y el DID nunca
   # incorporaría una clave nueva (le pasó al emisor propio el 17-sep-2026: el script «funcionaba»
   # y no cambiaba nada). Si Certify no responde, se falla en voz alta en vez de escribir algo viejo.
-  CRUDO="$(cd "${KIT_DIR}" && docker compose exec -T caddy \
+  load_compose_args
+  CRUDO="$(cd "${KIT_DIR}" && "${KIT_COMPOSE[@]}" exec -T caddy \
             wget -qO- http://certify:8090/v1/certify/.well-known/did.json 2>/dev/null)" \
     || { echo "ERROR: no se pudo leer el DID de Certify. ¿Está en pie? Pruebe: docker compose ps certify" >&2; exit 1; }
 fi

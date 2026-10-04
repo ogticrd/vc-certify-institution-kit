@@ -176,7 +176,7 @@ describe("LOGO_PATH obligatorio y PNG (R10)", () => {
     const e = prepararEntorno({ runtime, extra });
     try {
       antes?.(e);
-      const paso = runtime ? e.pasos.runtime : e.pasos.generar;
+      const paso = e.pasos.generar;
       assert.notEqual(paso.status, 0, "debía fallar");
       assert.match(paso.stderr, patron);
       assert.equal(e.existe("sql"), false, "no se genera nada si el logo no vale");
@@ -388,20 +388,21 @@ describe("generate-did.sh (R5)", () => {
     };
 
     test("la orden es `docker compose exec -T caddy wget -qO- http://certify:8090/v1/certify/.well-known/did.json`, no la URL pública", () => {
-      const e = prepararEntorno({ runtime: false, generar: false });
+      const e = prepararEntorno();
       try {
         const bin = dockerFalso(e, `cat "${join(AQUI, "fixtures", "did-certify.json")}"`);
         const r = e.ejecutar('bash "$PWD/scripts/generate-did.sh"', { PATH: `${bin}:${process.env.PATH}` });
         assert.equal(r.status, 0, r.stderr);
         const args = readFileSync(join(e.raiz, "docker-args"), "utf8").trim();
-        assert.equal(args, "compose exec -T caddy wget -qO- http://certify:8090/v1/certify/.well-known/did.json");
+        // La orden de compose es la de generated/compose-args (T5): ficheros del modo y .env.runtime.
+        assert.equal(args, "compose -f docker-compose.yml -f docker-compose.tls.yml --env-file generated/.env.runtime exec -T caddy wget -qO- http://certify:8090/v1/certify/.well-known/did.json");
         assert.doesNotMatch(args, /emisor\.prueba\.invalid/);
         assert.deepEqual(leerDid(e).assertionMethod, ["did:web:emisor.prueba.invalid#key-0"]);
       } finally { e.limpiar(); }
     });
 
     test("si Certify no responde (docker falla): error en español y no escribe nada", () => {
-      const e = prepararEntorno({ runtime: false, generar: false });
+      const e = prepararEntorno();
       try {
         const bin = dockerFalso(e, "exit 1");
         const r = e.ejecutar('bash "$PWD/scripts/generate-did.sh"', { PATH: `${bin}:${process.env.PATH}` });
@@ -412,7 +413,7 @@ describe("generate-did.sh (R5)", () => {
     });
 
     test("si Certify devuelve vacío: error y no escribe nada", () => {
-      const e = prepararEntorno({ runtime: false, generar: false });
+      const e = prepararEntorno();
       try {
         const bin = dockerFalso(e, "true");
         const r = e.ejecutar('bash "$PWD/scripts/generate-did.sh"', { PATH: `${bin}:${process.env.PATH}` });
@@ -439,7 +440,7 @@ describe("el orden de install.sh (R5): el DID se corrige con Certify ya en march
     const iFinal = install.indexOf("Instalación completada");
     assert.ok(iSalud !== -1 && iDid !== -1 && iFinal !== -1);
     assert.ok(iSalud < iDid && iDid < iFinal);
-    assert.ok(install.indexOf("docker compose up") < iSalud);
+    assert.ok(install.indexOf('"${KIT_COMPOSE[@]}" up -d') !== -1 && install.indexOf('"${KIT_COMPOSE[@]}" up -d') < iSalud);
   });
 
   test("generate-config.sh NO lo ejecuta (no hay Certify todavía) pero sí crea la carpeta vacía que Caddy monta", () => {
@@ -450,7 +451,7 @@ describe("el orden de install.sh (R5): el DID se corrige con Certify ya en march
 
   test("verify-health.sh pregunta el health por la red interna: el actuator ya no es público", () => {
     const t = readFileSync(join(KIT_ORIGEN, "scripts", "verify-health.sh"), "utf8");
-    assert.match(t, /docker compose exec -T caddy wget -qO- http:\/\/certify:8090\/v1\/certify\/actuator\/health/);
+    assert.match(t, /"\$\{KIT_COMPOSE\[@\]\}" exec -T caddy wget -qO- http:\/\/certify:8090\/v1\/certify\/actuator\/health/);
     assert.doesNotMatch(t, /curl[^\n]*actuator\/health/);
   });
 });

@@ -12,10 +12,9 @@
 // Estructura del temporal:  <raiz>/institution-kit/...   (así `..` = <raiz>, como en el
 // fork, y nada se escribe fuera de <raiz>).
 //
-// Nota sobre `.env.runtime`: lo escribe `install.sh` (función `write_runtime_env`), no
-// `generate-config.sh`. `install.sh` exige docker/curl/jq y construye la imagen, así que
-// aquí se reproduce SOLO su tramo de configuración (load_env ... write_runtime_env) con
-// las mismas funciones de `scripts/lib/common.sh`. Ver registro T1.
+// Nota sobre `.env.runtime`: desde T4 lo escribe `generate-config.sh` (antes lo hacía `install.sh`,
+// y el arnés reproducía su tramo de configuración). El parámetro `runtime` de `prepararEntorno` se
+// conserva por compatibilidad con las pruebas anteriores y ya no hace nada.
 import { spawnSync } from "node:child_process";
 import {
   cpSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, statSync,
@@ -45,6 +44,7 @@ export const ENV_BASE = {
   INSTITUTION_ID: "prueba",
   INSTITUTION_DISPLAY_NAME: "Institucion de Prueba",
   RESTAPI_BASE_URL: "https://api.prueba.invalid/datos",
+  RESTAPI_TOKEN_URL: "https://api.prueba.invalid/oauth2/token",
   OAUTH_CLIENT_ID: "cliente-de-mentira",
   OAUTH_CLIENT_SECRET: "secreto-de-mentira",
   CREDENTIAL_CONFIG_KEY_ID: "PruebaLicencia",
@@ -53,6 +53,7 @@ export const ENV_BASE = {
   // LOGO_PATH (obligatorio desde T3) lo pone prepararEntorno: apunta a un PNG de 1×1 en el temporal.
   POSTGRES_USER: "postgres",
   POSTGRES_PASSWORD: "clave-bd-de-mentira",
+  KEYSTORE_PASSWORD: "clave-keystore-de-mentira",
   POSTGRES_DB: "inji_certify",
 };
 
@@ -65,13 +66,6 @@ export function escribirEnv(ruta, { modo = "domain", extra = {} } = {}) {
   writeFileSync(ruta, lineas.join("\n") + "\n");
 }
 
-// Tramo de install.sh (líneas "load_env ... export_env_for_templates") sin docker ni build.
-const TRAMO_INSTALL = [
-  'source "$PWD/scripts/lib/common.sh"',
-  "load_env", "apply_defaults", "derive_public_url", "derive_did_url", "validate_env",
-  "write_runtime_env", "export_env_for_templates",
-].join("; ");
-
 function bash(cwd, orden, env) {
   const r = spawnSync("bash", ["-c", orden], { cwd, encoding: "utf8", env });
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
@@ -82,10 +76,11 @@ function bash(cwd, orden, env) {
  * @param {object} o
  * @param {"domain"|"ip"|string} o.modo       valor de TLS_MODE
  * @param {object} o.extra                    variables del .env que se suman/sustituyen
- * @param {boolean} o.runtime                 reproducir el tramo de install.sh que escribe .env.runtime (por defecto sí)
+ * @param {boolean} o.runtime                 (sin efecto desde T4: generate-config.sh escribe .env.runtime)
  * @param {boolean} o.generar                 ejecutar generate-config.sh (por defecto sí)
  * @param {string|null} o.envTexto            si se da, se escribe como .env (en vez de ENV_BASE); `__LOGO_PATH__` se sustituye por el PNG de prueba
  */
+// eslint-disable-next-line no-unused-vars
 export function prepararEntorno({ modo = "domain", extra = {}, runtime = true, generar = true, envTexto = null } = {}) {
   const raiz = mkdtempSync(join(tmpdir(), "kit-prueba-"));
   const kit = join(raiz, "institution-kit");
@@ -104,13 +99,11 @@ export function prepararEntorno({ modo = "domain", extra = {}, runtime = true, g
   };
 
   const pasos = {};
-  if (runtime) pasos.runtime = bash(kit, TRAMO_INSTALL, env);
-  if (generar && (!runtime || pasos.runtime.status === 0)) {
-    pasos.generar = bash(kit, 'bash "$PWD/scripts/generate-config.sh"', env);
-  }
+  if (generar) pasos.generar = bash(kit, 'bash "$PWD/scripts/generate-config.sh"', env);
   const gen = join(kit, "generated");
   const rutas = {
     runtime: join(gen, ".env.runtime"),
+    composeArgs: join(gen, "compose-args"),
     propiedadesDefault: join(gen, "config", "certify-default.properties"),
     propiedadesInstitucion: join(gen, "config", "certify-institution.properties"),
     caddyfile: join(gen, "caddy", "Caddyfile"),
@@ -125,7 +118,7 @@ export function prepararEntorno({ modo = "domain", extra = {}, runtime = true, g
   const ejecutar = (orden, adicional = {}) => bash(kit, orden, { ...env, ...adicional });
   return {
     raiz, kit, generated: gen, rutas, pasos, ejecutar, logoOrigen: logo,
-    salida: (pasos.generar ?? pasos.runtime ?? { stdout: "", stderr: "", status: null }),
+    salida: (pasos.generar ?? { stdout: "", stderr: "", status: null }),
     existe: (clave) => existsSync(rutas[clave]),
     leer: (clave) => readFileSync(rutas[clave], "utf8"),
     modo: (clave) => statSync(rutas[clave]).mode & 0o777,

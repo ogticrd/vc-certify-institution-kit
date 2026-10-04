@@ -10,7 +10,10 @@ mosip.certify.data-provider-plugin.id-field-prefix-uri=https://mosip.io/credenti
 mosip.certify.data-provider-plugin.issuer.vc-sign-algo=Ed25519Signature2020
 mosip.certify.data-provider-plugin.restapi.scope-endpoint-mapping=${RESTAPI_SCOPE_ENDPOINT_MAPPING}
 
-mosip.certify.data-provider-plugin.restapi.auth.token-url=https://cuenta.digital.gob.do/oauth2/token
+# Token de la API de datos de la institución (RESTAPI_BASE_URL), NO el del ciudadano. OGTIC entrega el
+# valor (RESTAPI_TOKEN_URL en el .env, sin defecto). Mismo nombre de propiedad que el emisor propio
+# (inji-vc/stack/config/certify-soyyord.properties).
+mosip.certify.data-provider-plugin.restapi.auth.token-url=${RESTAPI_TOKEN_URL}
 mosip.certify.data-provider-plugin.restapi.auth.client-id=${OAUTH_CLIENT_ID}
 mosip.certify.data-provider-plugin.restapi.auth.client-secret=${OAUTH_CLIENT_SECRET}
 

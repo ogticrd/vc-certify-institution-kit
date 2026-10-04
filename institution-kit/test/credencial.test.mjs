@@ -449,10 +449,10 @@ describe("scripts: sintaxis y modo de prueba sin ejecutar nada", () => {
       writeFileSync(join(bin, "docker"), `#!/bin/sh\necho "$@" >> "${marca}"\n`); chmodSync(join(bin, "docker"), 0o755);
       const r = e.ejecutar('bash "$PWD/scripts/apply-credential.sh"', { DRY_RUN: "1", PATH: `${bin}:${process.env.PATH}` });
       assert.equal(r.status, 0, r.stderr);
-      const linea = r.stdout.split("\n").find((l) => l.startsWith("docker compose exec"));
+      const linea = r.stdout.split("\n").find((l) => l.startsWith("docker compose "));
       assert.ok(linea, r.stdout);
       assert.equal(linea.trim(),
-        `docker compose exec -T database psql -v ON_ERROR_STOP=1 -U postgres -d inji_certify < ${join(realpathSync(e.generated), "credential_config.sql")}`);
+        `docker compose -f docker-compose.yml -f docker-compose.tls.yml --env-file generated/.env.runtime exec -T database psql -v ON_ERROR_STOP=1 -U postgres -d inji_certify < ${join(realpathSync(e.generated), "credential_config.sql")}`);
       assert.equal(existsSync(marca), false, "no se llamó a docker");
       assert.ok(e.existe("sql"), "regeneró el SQL antes de imprimir");
     } finally { e.limpiar(); }

@@ -67,7 +67,7 @@ El equipo de infraestructura debe asegurar que los siguientes puertos estén dis
 |--------|-----------|---------|-------|
 | 80/tcp | in | Internet → servidor (Caddy) | Validación ACME HTTP-01 (Let's Encrypt) y renovación automática del certificado. Obligatorio en ambos modos (`domain` e `ip`). |
 | 443/tcp | in | Internet → servidor (Caddy) | HTTPS público del emisor (OID4VCI, health, DID). Obligatorio en ambos modos. |
-| 443/tcp | out | `cuenta.digital.gob.do` | OAuth / validación de tokens JWT (Cuenta Única / Cuenta Digital). |
+| 443/tcp | out | `auth.cuentaunica.gob.do` | Validación de tokens JWT de Cuenta Única (claves públicas en `/.well-known/jwks.json`). |
 | 443/tcp | out | URL de la API de datos de la institución | Obtener los datos del ciudadano para armar la credencial. |
 | 443/tcp | out | Registries Docker / Maven | Descarga de imágenes y dependencias en el build (primera instalación). |
 

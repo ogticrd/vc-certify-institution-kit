@@ -1,0 +1,9 @@
+# Superpuesto para TLS_MODE=domain e ip: Caddy obtiene el certificado (ACME HTTP-01) y publica 80 y 443
+# del servidor, exactamente como antes de existir el modo proxy. Se usa junto a docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml --env-file generated/.env.runtime …
+# (generate-config.sh deja esa orden en generated/compose-args).
+services:
+  caddy:
+    ports:
+      - "80:80"
+      - "443:443"

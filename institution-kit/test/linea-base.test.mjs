@@ -23,7 +23,6 @@ for (const modo of ["domain", "ip"]) {
 
     // T2: de cinco a siete ficheros (se suman el contexto propio y la credencial de muestra); T3: el logo.
     test("la generación termina bien y produce los ocho ficheros", () => {
-      assert.equal(e.pasos.runtime.status, 0, e.pasos.runtime.stderr);
       assert.equal(e.pasos.generar.status, 0, e.pasos.generar.stderr);
       for (const clave of ["runtime", "propiedadesDefault", "propiedadesInstitucion", "caddyfile", "sql", "muestra", "contexto", "logo"]) {
         assert.ok(e.existe(clave), `falta ${clave}: ${e.rutas[clave]}`);
@@ -37,10 +36,13 @@ for (const modo of ["domain", "ip"]) {
       assert.match(r, new RegExp(`^TLS_MODE=${modo}$`, "m"));
     });
 
-    test("DEFECTO (T4): .env.runtime guarda en claro el secreto OAuth y la contraseña de Postgres", () => {
+    // T4 (D7): antes «DEFECTO: .env.runtime guarda en claro el secreto OAuth». Ahora solo lleva lo que
+    // la ejecución necesita (las contraseñas, con modo 600); el OAUTH_CLIENT_SECRET ya no se copia.
+    test(".env.runtime lleva las contraseñas de ejecución y no copia el OAUTH_CLIENT_SECRET (T4)", () => {
       const r = e.leer("runtime");
-      assert.match(r, /^OAUTH_CLIENT_SECRET=secreto-de-mentira$/m);
       assert.match(r, /^POSTGRES_PASSWORD=clave-bd-de-mentira$/m);
+      assert.match(r, /^KEYSTORE_PASSWORD=clave-keystore-de-mentira$/m);
+      assert.doesNotMatch(r, /OAUTH_CLIENT_SECRET|secreto-de-mentira/);
     });
 
     // T2 (R7): antes «un INSERT sin ON CONFLICT y con config_id aleatorio (gen_random_uuid)».
@@ -117,14 +119,16 @@ for (const modo of ["domain", "ip"]) {
       assert.match(c, /\/v1\/certify\/actuator\*/);
     });
 
-    test("DEFECTO R4: las properties apuntan a cuenta.digital.gob.do (staging)", () => {
+    // T4 (R4): antes «DEFECTO R4: las properties apuntan a cuenta.digital.gob.do (staging)». Las pruebas
+    // del emisor de producción y de AUTH_ISSUER_URL están en auth-secretos.test.mjs.
+    test("R4: las properties apuntan a auth.cuentaunica.gob.do y el token de la API de datos sale del .env (T4)", () => {
+      const sinComentarios = (t) => t.split("\n").filter((l) => !l.startsWith("#")).join("\n");
       const p = e.leer("propiedadesDefault");
-      assert.match(p, /^mosip\.certify\.authorization\.url=https:\/\/cuenta\.digital\.gob\.do$/m);
-      assert.match(p, /^mosip\.certify\.authn\.issuer-uri=https:\/\/cuenta\.digital\.gob\.do$/m);
-      assert.match(p, /^mosip\.certify\.authn\.jwk-set-uri=https:\/\/cuenta\.digital\.gob\.do\/\.well-known\/jwks\.json$/m);
-      assert.doesNotMatch(p, /auth\.cuentaunica\.gob\.do/);
+      assert.match(p, /^mosip\.certify\.authorization\.url=https:\/\/auth\.cuentaunica\.gob\.do$/m);
+      assert.doesNotMatch(sinComentarios(p), /cuenta\.digital\.gob\.do/);
       const i = e.leer("propiedadesInstitucion");
-      assert.match(i, /^mosip\.certify\.data-provider-plugin\.restapi\.auth\.token-url=https:\/\/cuenta\.digital\.gob\.do\/oauth2\/token$/m);
+      assert.match(i, /^mosip\.certify\.data-provider-plugin\.restapi\.auth\.token-url=https:\/\/api\.prueba\.invalid\/oauth2\/token$/m);
+      assert.doesNotMatch(sinComentarios(i), /cuenta\.digital\.gob\.do/);
     });
 
     test("properties: URL pública, DID y base de datos sustituidos; ninguna variable sin sustituir", () => {
@@ -136,21 +140,19 @@ for (const modo of ["domain", "ip"]) {
       assert.match(i, /^mosip\.certify\.data-provider-plugin\.restapi\.auth\.client-id=cliente-de-mentira$/m);
       assert.match(i, /^mosip\.certify\.data-provider-plugin\.restapi\.base-url=https:\/\/api\.prueba\.invalid\/datos$/m);
       // envsubst solo toca la lista blanca: quedan ${mosip...} propios de Spring, nunca de las variables del kit.
-      for (const f of [p, i]) assert.doesNotMatch(f, /\$\{(CERTIFY_|DID_URL|POSTGRES_|OAUTH_|RESTAPI_|INSTITUTION_)/);
+      for (const f of [p, i]) assert.doesNotMatch(f, /\$\{(CERTIFY_|DID_URL|POSTGRES_|OAUTH_|RESTAPI_|INSTITUTION_|AUTH_ISSUER_|KEYSTORE_)/);
     });
 
-    test("DEFECTO R9: actuator completo, env.show-values=ALWAYS, contraseñas en claro", () => {
+    // T4 (R9, R12): antes «DEFECTO R9: actuator completo, env.show-values=ALWAYS» y «DEFECTO: no hay
+    // configuración de logging». Detalle en auth-secretos.test.mjs.
+    test("R9, R12: actuator solo health con env NEVER y el filtro del token en WARN (T4)", () => {
       const p = e.leer("propiedadesDefault");
-      assert.match(p, /^management\.endpoints\.web\.exposure\.include=\*$/m);
-      assert.match(p, /^management\.endpoint\.env\.show-values=ALWAYS$/m);
-      assert.match(p, /^mosip\.kernel\.keymanager\.hsm\.keystore-pass=local$/m);
+      assert.match(p, /^management\.endpoints\.web\.exposure\.include=health$/m);
+      assert.match(p, /^management\.endpoint\.env\.show-values=NEVER$/m);
+      assert.match(p, /^mosip\.kernel\.keymanager\.hsm\.keystore-pass=clave-keystore-de-mentira$/m);
       assert.match(p, /^spring\.datasource\.password=clave-bd-de-mentira$/m);
+      assert.match(p, /^logging\.level\.io\.mosip\.certify\.filter=WARN$/m);
       assert.match(e.leer("propiedadesInstitucion"), /^mosip\.certify\.data-provider-plugin\.restapi\.auth\.client-secret=secreto-de-mentira$/m);
-    });
-
-    test("DEFECTO: no hay configuración de logging; Certify arranca con el nivel INFO por defecto (R12)", () => {
-      assert.doesNotMatch(e.leer("propiedadesDefault"), /^logging\./m);
-      assert.doesNotMatch(e.leer("propiedadesInstitucion"), /^logging\./m);
     });
   });
 }
@@ -180,11 +182,13 @@ describe("línea base · casos límite del comportamiento actual", () => {
     } finally { e.limpiar(); }
   });
 
-  test("DEFECTO (T4): generate-config.sh por sí solo NO escribe .env.runtime (lo hace install.sh)", () => {
-    const e = prepararEntorno({ runtime: false });
+  // T4 (D7): antes «DEFECTO: generate-config.sh por sí solo NO escribe .env.runtime (lo hace install.sh)».
+  test("generate-config.sh escribe .env.runtime (modo 600) sin necesitar install.sh (T4)", () => {
+    const e = prepararEntorno();
     try {
       assert.equal(e.pasos.generar.status, 0, e.pasos.generar.stderr);
-      assert.equal(e.existe("runtime"), false);
+      assert.equal(e.existe("runtime"), true);
+      assert.equal(e.modo("runtime"), 0o600);
       assert.ok(e.existe("sql"));
     } finally { e.limpiar(); }
   });
@@ -210,10 +214,11 @@ describe("línea base · casos límite del comportamiento actual", () => {
   test("el .env.example del kit, con el secreto sustituido, genera sin error", () => {
     const ejemplo = readFileSync(join(KIT_ORIGEN, ".env.example"), "utf8")
       .replace("REEMPLAZAR_CON_SECRET_DE_OGTIC", "secreto-de-mentira")
+      .replace("OAUTH_CLIENT_ID=CAMBIAR-ME", "OAUTH_CLIENT_ID=cliente-de-mentira")
+      .replace(/^RESTAPI_TOKEN_URL=$/m, "RESTAPI_TOKEN_URL=https://api.prueba.invalid/oauth2/token")
       .replace(/^LOGO_PATH=$/m, "LOGO_PATH=__LOGO_PATH__");
     const e = prepararEntorno({ envTexto: ejemplo });
     try {
-      assert.equal(e.pasos.runtime.status, 0, e.pasos.runtime.stderr);
       assert.equal(e.pasos.generar.status, 0, e.pasos.generar.stderr);
       assert.equal(literal(valoresSql(e.leer("sql")).credential_config_key_id), "DriverLicenseCredential");
     } finally { e.limpiar(); }

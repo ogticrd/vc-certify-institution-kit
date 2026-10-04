@@ -26,6 +26,13 @@ echo "=== Kit de implantación Inji Certify ==="
 require_cmd docker
 require_cmd curl
 require_cmd jq
+# envsubst (paquete gettext-base en Debian/Ubuntu, gettext en otros) lo usan los generadores de
+# properties y de Caddyfile; openssl genera las contraseñas aleatorias.
+if ! command -v envsubst >/dev/null 2>&1; then
+  echo "ERROR: Comando requerido no encontrado: envsubst. Instale el paquete gettext-base (Debian/Ubuntu: sudo apt-get install -y gettext-base; RHEL/Fedora: gettext)." >&2
+  exit 1
+fi
+require_cmd openssl
 docker compose version >/dev/null 2>&1 || { echo "ERROR: Docker Compose v2 requerido (docker compose)" >&2; exit 1; }
 
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -45,7 +52,6 @@ derive_public_url
 derive_did_url
 validate_env
 resolve_plugin_jar
-write_runtime_env
 export_env_for_templates
 
 echo "Modo TLS: ${TLS_MODE}"
@@ -58,12 +64,17 @@ echo "=== Generando configuración ==="
 "${KIT_DIR}/scripts/generate-config.sh"
 
 echo ""
+# generate-config.sh dejó en generated/compose-args la orden de docker compose de este modo (ficheros
+# superpuestos y contraseñas de generated/.env.runtime). Todo `docker compose` del kit la usa.
+load_compose_args
+
+echo ""
 echo "=== Construyendo imagen Certify (puede tardar varios minutos la primera vez) ==="
-docker compose build
+"${KIT_COMPOSE[@]}" build
 
 echo ""
 echo "=== Levantando stack ==="
-docker compose up -d
+"${KIT_COMPOSE[@]}" up -d
 
 echo ""
 echo "Caddy solicitará certificado Let's Encrypt (ACME HTTP-01)."
@@ -74,7 +85,7 @@ else
   echo "Si Caddy ya usó certificado interno antes, limpie el volumen: docker compose down && docker volume rm institution-kit_caddy_data"
 fi
 echo "Monitoreando logs de Caddy (30s) ..."
-timeout 30 docker compose logs -f caddy 2>/dev/null || true
+timeout 30 "${KIT_COMPOSE[@]}" logs -f caddy 2>/dev/null || true
 
 echo ""
 echo "=== Verificando endpoints ==="

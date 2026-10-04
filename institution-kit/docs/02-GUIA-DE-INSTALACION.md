@@ -145,6 +145,8 @@ INSTITUTION_DISPLAY_NAME=INTRANT
 RESTAPI_BASE_URL=https://api.ogtic.gob.do/intrant
 ```
 
+| `RESTAPI_TOKEN_URL` | Dirección donde Certify pide el token de la **API de datos** (no el del ciudadano ni el de Cuenta Única) | OGTIC entrega el valor. Sin él el kit no genera nada: no hay valor por defecto |
+
 La línea `RESTAPI_SCOPE_ENDPOINT_MAPPING` puede quedar como viene en la plantilla, salvo que OGTIC le indique otro valor.
 
 ### 4.4 Acceso a Cuenta Única (CuentaDigital)
@@ -155,9 +157,11 @@ La línea `RESTAPI_SCOPE_ENDPOINT_MAPPING` puede quedar como viene en la plantil
 | `OAUTH_CLIENT_SECRET` | Contraseña asociada a ese identificador | OGTIC |
 
 ```bash
-OAUTH_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+OAUTH_CLIENT_ID=el-id-que-entrego-ogtic
 OAUTH_CLIENT_SECRET=el-secret-real-que-entrego-ogtic
 ```
+
+(La plantilla trae el marcador `CAMBIAR-ME`; el kit no genera nada mientras siga ahí.) El servidor de autorización de los ciudadanos es **Cuenta Única de producción** (`https://auth.cuentaunica.gob.do`); solo cambia con la variable opcional `AUTH_ISSUER_URL` (sin barra final: el emisor del token se compara tal cual).
 
 ### 4.5 Credencial que va a emitir
 
@@ -206,7 +210,16 @@ Si pone un `DID_URL` externo pero no publica ahí el archivo, la verificación d
 
 Las líneas que empiezan con `#` (logo, colores, etiquetas en español, etc.) pueden quedar comentadas. El kit aplica valores por defecto. Solo descoméntelas si OGTIC o su equipo quieren personalizar la apariencia de la credencial.
 
-### 4.8 Guardar y salir
+### 4.8 Contraseñas de la base de datos y del keystore
+
+`POSTGRES_PASSWORD` y `KEYSTORE_PASSWORD` traen en la plantilla los valores de siempre (`postgres`, `local`). **Déjelos así en una instalación nueva**: el kit genera contraseñas aleatorias de 64 caracteres y las guarda **solo** en `generated/.env.runtime` (permisos 600); no se escriben en ninguna salida ni registro. Las generadas se reutilizan cada vez que vuelva a generar la configuración.
+
+**Esto solo vale para instalaciones nuevas.** La contraseña de la base queda grabada en el volumen de datos al crearla, y la del keystore en el keystore de Certify al primer arranque; cambiarlas después en `.env.runtime` rompe el arranque. Si ya tiene una instalación con base de datos:
+
+- Cambie la contraseña **en la base** (`ALTER USER postgres PASSWORD '…'`) y póngala en `POSTGRES_PASSWORD` del `.env`, distinta de `postgres`.
+- Para el keystore ya creado con `local` no hay un cambio seguro desde el kit: ponga `KIT_CONSERVAR_SECRETOS_POR_DEFECTO=1` para que no genere contraseñas nuevas y deje `postgres`/`local` tal cual (rótelas luego con su equipo de seguridad).
+
+### 4.9 Guardar y salir
 
 Guarde el archivo `.env` y cierre el editor.
 

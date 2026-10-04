@@ -30,7 +30,8 @@ SQL_FILE="${GENERATED_DIR}/credential_config.sql"
 [[ -f "${SQL_FILE}" ]] || { echo "ERROR: no existe ${SQL_FILE}; ejecute scripts/generate-config.sh primero." >&2; exit 1; }
 
 cd "${KIT_DIR}"
-PSQL=(docker compose exec -T database psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER}" -d "${POSTGRES_DB}")
+load_compose_args
+PSQL=("${KIT_COMPOSE[@]}" exec -T database psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER}" -d "${POSTGRES_DB}")
 
 if [[ -n "${DRY_RUN:-}" ]]; then
   printf '%q ' "${PSQL[@]}"; printf '< %q\n' "${SQL_FILE}"

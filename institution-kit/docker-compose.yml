@@ -32,6 +32,8 @@ services:
       - DATABASE_PORT=5432
       - DATABASE_USERNAME=${POSTGRES_USER:-postgres}
       - DATABASE_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      # El XML manda sobre la propiedad logging.level: ver el comentario de templates/logback-kit.xml (R12).
+      - LOGGING_CONFIG=/home/mosip/config/logback-kit.xml
     command:
       [
         "java",
@@ -46,6 +48,7 @@ services:
     volumes:
       - ./generated/config/certify-default.properties:/home/mosip/config/certify-default.properties:ro
       - ./generated/config/certify-institution.properties:/home/mosip/config/certify-institution.properties:ro
+      - ./templates/logback-kit.xml:/home/mosip/config/logback-kit.xml:ro
       - certify-pkcs12:/home/mosip/CERTIFY_PKCS12
     depends_on:
       database:
@@ -55,9 +58,9 @@ services:
 
   caddy:
     image: caddy:2-alpine
-    ports:
-      - "80:80"
-      - "443:443"
+    # Los puertos NO se declaran aquí: dependen del modo y los pone el fichero superpuesto
+    # (docker-compose.tls.yml: 80 y 443; docker-compose.proxy.yml: solo CADDY_HTTP_PORT). La orden
+    # exacta queda escrita en generated/compose-args; install.sh y los demás scripts la usan.
     volumes:
       - ./generated/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       # Lo que Caddy sirve como fichero (solo lectura). Carpetas, no ficheros: un fichero que aún no

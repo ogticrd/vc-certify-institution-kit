@@ -47,26 +47,48 @@ mosip.certify.security.cors-enabled-get-method-urls=/rendering-template/**
 
 ## ------------------------------------------ Discovery / OID4VCI -------------------------------------------
 mosip.certify.discovery.issuer-id=${mosip.certify.domain.url}${server.servlet.path}
-mosip.certify.authorization.url=https://cuenta.digital.gob.do
+# Servidor de autorización de los ciudadanos (R4): Cuenta Única de producción por defecto
+# (AUTH_ISSUER_URL en el .env; sin barra final). Los tres valores han de ser EXACTAMENTE el `issuer`
+# que declara ese servidor: Certify compara el `iss` del token por igualdad exacta (JwtIssuerValidator),
+# y Mimoto y las apps validan que el issuer coincida con la URL de la que bajaron su metadata. El
+# staging anterior (cuenta.digital.gob.do) y `mi.cuentaunica.gob.do` declaran otro issuer y rechazan
+# todo token de producción. Procedencia: inji-vc/stack/config/certify-soyyord.properties (H-2).
+mosip.certify.authorization.url=${AUTH_ISSUER_URL}
 mosip.certify.plugin-mode=DataProvider
 mosip.certify.supported.jwt-proof-alg={'RS256','PS256','ES256','Ed25519'}
 mosip.certify.cnonce-expire-seconds=40
 
 mosip.certify.identifier=${mosip.certify.domain.url}
 mosip.certify.authn.filter-urls={ '${server.servlet.path}/issuance/credential', '${server.servlet.path}/issuance/vd11/credential', '${server.servlet.path}/issuance/vd12/credential' }
-mosip.certify.authn.issuer-uri=https://cuenta.digital.gob.do
-mosip.certify.authn.jwk-set-uri=https://cuenta.digital.gob.do/.well-known/jwks.json
+mosip.certify.authn.issuer-uri=${AUTH_ISSUER_URL}
+mosip.certify.authn.jwk-set-uri=${AUTH_ISSUER_URL}/.well-known/jwks.json
 mosip.certify.authn.allowed-audiences={ '${mosipbox.public.url}${server.servlet.path}/issuance/credential', '${mosip.certify.authorization.url}/v1/esignet/vci/credential' }
 
-# CuentaDigital / RD MVP — validaciones relajadas (ver docs/IUGO-CUSTOMIZATIONS.md)
+# Validaciones relajadas del token y del proof. NO las cambie sin probar la emisión con Cuenta Única:
+# pueden rechazar tokens válidos. Qué relaja cada una, por qué y qué riesgo deja:
+# institution-kit/docs/IUGO-CUSTOMIZATIONS.md
 mosip.certify.authn.validate-audience=false
 mosip.certify.authn.require-client-id-claim=false
 mosip.certify.issuance.validate-cnonce=false
 
 ## ---------------------------------------- Actuator --------------------------------------------------------
-management.endpoint.env.show-values=ALWAYS
-management.endpoints.web.exposure.include=*
+# R9: solo `health` (para el healthcheck interno de install.sh), sin detalles, y `env` nunca muestra
+# valores aunque alguien lo exponga. Caddy además responde 404 a /v1/certify/actuator/* salvo `health`
+# desde la red interna. `/actuator/**` sigue en ignore-auth-urls (arriba): hace falta, porque el health
+# interno se pide sin token; con `exposure.include=health` no hay otro endpoint al que llegar.
+management.endpoints.web.exposure.include=health
+management.endpoint.health.show-details=never
+management.endpoint.env.show-values=NEVER
 management.health.redis.enabled=false
+
+## ---------------------------------------- Registro (logs) -------------------------------------------------
+# R12: el filtro de validación del token (AccessTokenValidationFilter, paquete io.mosip.certify.filter)
+# escribía a INFO el token de acceso completo y todas sus claims (commit 541f1d9 «add token logs»).
+# Con WARN, aunque alguien reintroduzca un log.info en ese paquete, no sale. Defensa en profundidad:
+# la corrección de fondo es borrar esas líneas del fuente (decisión aparte), y el nivel también está en
+# templates/logback-kit.xml (LOGGING_CONFIG en docker-compose.yml), que es lo que manda cuando una
+# dependencia trae su propio logback.xml. Ver docs/IUGO-CUSTOMIZATIONS.md.
+logging.level.io.mosip.certify.filter=WARN
 
 #------------------------------------ Key-manager --------------------------------------------------
 mosip.kernel.crypto.asymmetric-algorithm-name=RSA/ECB/OAEPWITHSHA-256ANDMGF1PADDING
@@ -85,7 +107,9 @@ mosip.kernel.certificate.sign.algorithm=SHA256withRSA
 
 mosip.kernel.keymanager.hsm.config-path=CERTIFY_PKCS12/local.p12
 mosip.kernel.keymanager.hsm.keystore-type=PKCS12
-mosip.kernel.keymanager.hsm.keystore-pass=local
+# Contraseña del keystore PKCS12: la genera el kit si se deja «local» (KEYSTORE_PASSWORD en el .env;
+# solo instalaciones nuevas: el keystore se crea con ella en el primer arranque).
+mosip.kernel.keymanager.hsm.keystore-pass=${KEYSTORE_PASSWORD}
 
 mosip.kernel.keymanager.certificate.default.common-name=www.example.com
 mosip.kernel.keymanager.certificate.default.organizational-unit=EXAMPLE-CENTER

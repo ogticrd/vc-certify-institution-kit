@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Configuración mínima de registro de Certify para el kit. docker-compose.yml la monta en
+  /home/mosip/config/logback-kit.xml y la referencia con LOGGING_CONFIG.
+
+  PROCEDENCIA: forma tomada de inji-vc/stack/config/logback-soyyord.xml (emisor propio de OGTIC,
+  4-oct-2026). Aquí SIN el fichero de log ni el codificador JSON: es lo mínimo para fijar el nivel
+  del paquete del filtro del token. La consola queda como la de Spring Boot por defecto.
+
+  POR QUÉ UN XML Y NO SOLO UNA PROPIEDAD. Varias dependencias de MOSIP (kernel-dataaccess-hibernate,
+  kernel-keymanager-service, kernel-pdfgenerator) traen un `logback.xml` dentro del jar. Cuando
+  logback encuentra un XML en el classpath, Spring Boot no aplica su configuración de registro por
+  defecto, y el emisor propio comprobó que con eso `logging.file.name` se ignora por completo
+  (logback montaba un solo ConsoleAppender teniendo la propiedad puesta). Para
+  `logging.level.<paquete>`, que también está en certify-default.properties, NO se midió que se
+  ignore: Spring la aplica después de cargar la configuración y en teoría funciona. No se confía en
+  una teoría para un dato personal: el nivel va también aquí, en un XML que manda en cualquier caso.
+  Esto NO toca el logback del fork ni del jar: es un fichero del kit, montado, al que apunta
+  LOGGING_CONFIG.
+
+  INCIDENTE 2026-10-04: el commit 541f1d9 del fork de Certify («add token logs») escribe a INFO el
+  token de acceso completo del ciudadano y todas sus claims en cada petición de credencial
+  (AccessTokenValidationFilter, paquete io.mosip.certify.filter). Mientras esas líneas sigan en el
+  fuente, el paquete queda en WARN. La corrección de fondo es borrarlas del fuente (decisión aparte,
+  no de la configuración). Una prueba del kit (test/auth-secretos.test.mjs) falla si este logger
+  desaparece o sube de WARN.
+-->
+<configuration>
+  <!-- Conversores y formato de consola de Spring Boot: la salida de `docker compose logs` no cambia. -->
+  <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+  <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+  <logger name="io.mosip.certify.filter" level="WARN"/>
+
+  <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+  </root>
+</configuration>

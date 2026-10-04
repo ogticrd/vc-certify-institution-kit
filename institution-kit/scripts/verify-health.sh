@@ -10,8 +10,10 @@ load_env
 apply_defaults
 derive_public_url
 export_env_for_templates
+load_compose_args
 
-# Ambos modos usan Let's Encrypt; sin -k para detectar cert inválido/autofirmado.
+# domain e ip usan Let's Encrypt; en proxy el certificado es el del proxy de la institución. Sin -k
+# para detectar un certificado inválido o autofirmado.
 CURL_OPTS=()
 
 BASE_URL="${CERTIFY_PUBLIC_URL}"
@@ -24,7 +26,7 @@ SLEEP_SECS=5
 echo "Verificando health de Certify (red interna) ..."
 
 for ((i = 1; i <= MAX_ATTEMPTS; i++)); do
-  if response=$(cd "${KIT_DIR}" && docker compose exec -T caddy wget -qO- http://certify:8090/v1/certify/actuator/health 2>/dev/null); then
+  if response=$(cd "${KIT_DIR}" && "${KIT_COMPOSE[@]}" exec -T caddy wget -qO- http://certify:8090/v1/certify/actuator/health 2>/dev/null); then
     status=$(echo "${response}" | jq -r '.status // empty')
     if [[ "${status}" == "UP" ]]; then
       echo "  Health: UP"
@@ -41,7 +43,7 @@ for ((i = 1; i <= MAX_ATTEMPTS; i++)); do
 done
 
 echo "Verificando openid-credential-issuer ..."
-if issuer=$(curl -sf "${CURL_OPTS[@]}" "${BASE_URL}/.well-known/openid-credential-issuer" 2>/dev/null); then
+if issuer=$(curl -sf ${CURL_OPTS[@]+"${CURL_OPTS[@]}"} "${BASE_URL}/.well-known/openid-credential-issuer" 2>/dev/null); then
   credential_endpoint=$(echo "${issuer}" | jq -r '.credential_endpoint // empty')
   if [[ -n "${credential_endpoint}" ]]; then
     echo "  credential_endpoint: ${credential_endpoint}"
