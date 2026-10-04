@@ -290,16 +290,9 @@ describe("D7 · secretos", () => {
     } finally { e.limpiar(); }
   });
 
-  test("KIT_CONSERVAR_SECRETOS_POR_DEFECTO=1 (instalación existente): no genera, deja postgres/local", () => {
-    const e = generar({ ...SIN_CONTRASENAS, KIT_CONSERVAR_SECRETOS_POR_DEFECTO: "1" });
-    try {
-      assert.equal(e.salida.status, 0, e.salida.stderr);
-      const r = e.leer("runtime");
-      assert.equal(valor(r, "POSTGRES_PASSWORD"), "postgres");
-      assert.equal(valor(r, "KEYSTORE_PASSWORD"), "local");
-      assert.doesNotMatch(e.salida.stderr, /se generaron contraseñas/);
-    } finally { e.limpiar(); }
-  });
+  // T8 (K3): «KIT_CONSERVAR_SECRETOS_POR_DEFECTO=1 deja postgres/local» desapareció: ver
+  // secretos-instalacion-previa.test.mjs (la variable se ignora con aviso y una instalación previa con las
+  // contraseñas por defecto detiene el kit).
 
   test(".env.runtime no copia el .env entero (solo contraseñas y secreto OAuth) y no deja temporales", () => {
     const e = generar(SIN_CONTRASENAS);

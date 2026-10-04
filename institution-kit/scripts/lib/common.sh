@@ -130,51 +130,105 @@ apply_defaults() {
   export CREDENTIAL_BG_COLOR CREDENTIAL_TEXT_COLOR
   export RESTAPI_SCOPE_ENDPOINT_MAPPING POSTGRES_USER POSTGRES_DB
   export AUTH_ISSUER_URL CADDY_HTTP_PORT TRUSTED_PROXIES
-  resolve_secrets
+  # Los secretos se resuelven en validate_env, DESPUÉS de validar (T7-3).
 }
 
-# --- Secretos (R9, D7) -----------------------------------------------------------------------------
+# --- Secretos (R9, D7; T8: K2, K3) -----------------------------------------------------------------
 # POSTGRES_PASSWORD y KEYSTORE_PASSWORD (contraseña del keystore PKCS12 de Certify): si la institución
 # deja el valor por defecto (postgres / local) o lo vacía, el kit genera 32 bytes aleatorios
 # (`openssl rand -hex 32`, 64 caracteres hex) y los guarda SOLO en generated/.env.runtime (modo 600).
 # Nunca se escriben en la salida estándar ni en ningún log.
 #
-# SOLO PARA INSTALACIONES NUEVAS. La contraseña de Postgres queda grabada en el volumen de datos al
-# crear la base, y la del keystore en generated/…/local.p12 (volumen certify-pkcs12) al primer
-# arranque de Certify; cambiarlas en .env.runtime después rompe el arranque (Postgres rechaza la
-# conexión; Certify no abre el keystore y no puede descifrar sus claves). Una instalación existente:
-#   - Postgres: cambie la contraseña EN la base (ALTER USER … PASSWORD '…') y póngala en
-#     POSTGRES_PASSWORD, explícita y distinta de «postgres».
-#   - Keystore: si ya arrancó con «local», no hay forma segura de cambiarla desde aquí; ponga
-#     KIT_CONSERVAR_SECRETOS_POR_DEFECTO=1 en el .env para que el kit NO genere contraseñas nuevas y
-#     deje los valores por defecto tal cual (la institución decide cómo rotarlos con keytool).
-# Las ya generadas se REUTILIZAN en cada ejecución (se leen de .env.runtime): regenerar la
-# configuración, o aplicar la credencial, no cambia las contraseñas.
+# REGLA (K2): las contraseñas SOLO se generan en una instalación NUEVA. La de Postgres queda grabada en el
+# volumen de datos al crear la base, y la del keystore en local.p12 (volumen certify-pkcs12) al primer
+# arranque de Certify; cambiarlas después rompe el arranque (Postgres rechaza la conexión; Certify no abre el
+# keystore y no puede descifrar sus claves de firma). Por eso:
+#   1. Valor propio en el .env (distinto del defecto): se respeta. Es la forma de rotar a mano.
+#   2. Hay una generada antes en .env.runtime (distinta del defecto): se REUTILIZA, no se regenera.
+#   3. Valor por defecto/vacío y NO hay generada, pero hay instalación previa (generated/.env.runtime, o un
+#      contenedor de la base o un volumen de datos/keystore de ESTE kit en Docker): el kit se DETIENE con el
+#      procedimiento para rotarlas a mano. No genera contraseñas nuevas (K2) y ya no existe la salida
+#      KIT_CONSERVAR_SECRETOS_POR_DEFECTO (K3): dejar postgres/local en silencio no es una opción.
+#   4. Instalación nueva (nada de lo anterior): se generan.
+# Se resuelven DESPUÉS de validar el .env (validate_env, T7-3): un .env inválido no deja contraseñas nuevas.
 SECRETO_DEFECTO_POSTGRES="postgres"
 SECRETO_DEFECTO_KEYSTORE="local"
 
-# Valor de CLAVE en generated/.env.runtime (sin ejecutar el fichero).
+# Valor de CLAVE en generated/.env.runtime (sin ejecutar el fichero; sin comillas si las tuviera).
 _valor_runtime() {
   [[ -f "${RUNTIME_ENV}" ]] || return 0
-  { grep -m1 "^$1=" "${RUNTIME_ENV}" || true; } | cut -d= -f2-
+  local v
+  v="$({ grep -m1 "^$1=" "${RUNTIME_ENV}" || true; } | cut -d= -f2-)"
+  if [[ "${v}" =~ ^\"(.*)\"$ || "${v}" =~ ^\'(.*)\'$ ]]; then v="${BASH_REMATCH[1]}"; fi
+  printf '%s' "${v}"
+}
+
+# Ejecuta una orden con límite de tiempo, en Linux y en macOS (que no trae `timeout`):
+#   kit_timeout <segundos> <orden> [argumentos…]   (devuelve 124 si se agotó, como `timeout`)
+kit_timeout() {
+  local seg="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then timeout "${seg}" "$@"; return; fi
+  if command -v gtimeout >/dev/null 2>&1; then gtimeout "${seg}" "$@"; return; fi
+  local rc=0 pid vigia marca
+  marca="$(mktemp "${TMPDIR:-/tmp}/kit-timeout.XXXXXX")"
+  "$@" &
+  pid=$!
+  ( sleep "${seg}"; echo 1 > "${marca}"; kill -TERM "${pid}" 2>/dev/null ) >/dev/null 2>&1 &
+  vigia=$!
+  wait "${pid}" 2>/dev/null || rc=$?
+  kill "${vigia}" 2>/dev/null || true
+  wait "${vigia}" 2>/dev/null || true
+  if [[ -s "${marca}" ]]; then rc=124; fi
+  rm -f "${marca}"
+  return "${rc}"
+}
+
+# ¿Hay una instalación previa de ESTE kit? Basta con generated/.env.runtime; además, si hay Docker, un
+# contenedor de la base (aunque esté parado) o un volumen de datos/keystore de este kit. Sin Docker, o con
+# el daemon parado, solo cuenta el fichero. Deja en INSTALACION_PREVIA_MOTIVO por qué.
+instalacion_previa() {
+  INSTALACION_PREVIA_MOTIVO=""
+  if [[ -f "${RUNTIME_ENV}" ]]; then
+    INSTALACION_PREVIA_MOTIVO="existe ${RUNTIME_ENV}"
+    return 0
+  fi
+  command -v docker >/dev/null 2>&1 || return 1
+  local salida proyecto
+  salida="$(kit_timeout 10 docker ps -a -q --filter "label=com.docker.compose.service=database" \
+    --filter "label=com.docker.compose.project.working_dir=${KIT_DIR}" 2>/dev/null || true)"
+  if [[ -n "${salida//[[:space:]]/}" ]]; then
+    INSTALACION_PREVIA_MOTIVO="hay un contenedor de la base de datos de este kit en Docker (docker ps -a)"
+    return 0
+  fi
+  proyecto="${COMPOSE_PROJECT_NAME:-$(basename "${KIT_DIR}" | tr '[:upper:]' '[:lower:]')}"
+  for vol in pgdata certify-pkcs12; do
+    salida="$(kit_timeout 10 docker volume ls -q --filter "label=com.docker.compose.project=${proyecto}" \
+      --filter "label=com.docker.compose.volume=${vol}" 2>/dev/null || true)"
+    if [[ -n "${salida//[[:space:]]/}" ]]; then
+      INSTALACION_PREVIA_MOTIVO="hay un volumen de Docker de este kit (${vol}: docker volume ls)"
+      return 0
+    fi
+  done
+  return 1
 }
 
 # Deja en $1 (nombre de variable) la contraseña a usar para $2 (clave en .env.runtime) cuyo valor por
-# defecto es $3. Marca SECRETOS_GENERADOS=1 si tuvo que generar una.
+# defecto es $3. Marca SECRETOS_GENERADOS=1 si tuvo que generar una; si hace falta generar pero hay una
+# instalación previa, anota la clave en SECRETOS_BLOQUEADOS (resolve_secrets se detiene).
 _resolver_secreto() {
   local var="$1" clave="$2" defecto="$3"
   local actual="${!var:-}"
   if [[ -n "${actual}" && "${actual}" != "${defecto}" ]]; then
     return 0  # la institución fijó un valor propio: se respeta
   fi
-  if [[ -n "${KIT_CONSERVAR_SECRETOS_POR_DEFECTO:-}" ]]; then
-    printf -v "${var}" '%s' "${defecto}"
-    return 0
-  fi
   local previo
   previo="$(_valor_runtime "${clave}")"
   if [[ -n "${previo}" && "${previo}" != "${defecto}" ]]; then
     printf -v "${var}" '%s' "${previo}"
+    return 0
+  fi
+  if instalacion_previa; then
+    SECRETOS_BLOQUEADOS+=("${clave}")
     return 0
   fi
   command -v openssl >/dev/null 2>&1 || { echo "ERROR: hace falta openssl para generar las contraseñas." >&2; exit 1; }
@@ -184,13 +238,39 @@ _resolver_secreto() {
 
 resolve_secrets() {
   SECRETOS_GENERADOS=""
+  SECRETOS_BLOQUEADOS=()
+  if [[ -n "${KIT_CONSERVAR_SECRETOS_POR_DEFECTO:-}" ]]; then
+    echo "AVISO: KIT_CONSERVAR_SECRETOS_POR_DEFECTO ya no existe y se ignora: el kit no deja las contraseñas por defecto (postgres/local). En una instalación existente, rótelas a mano y póngalas en el .env (guía, sección «Secretos»)." >&2
+  fi
   _resolver_secreto POSTGRES_PASSWORD POSTGRES_PASSWORD "${SECRETO_DEFECTO_POSTGRES}"
   _resolver_secreto KEYSTORE_PASSWORD KEYSTORE_PASSWORD "${SECRETO_DEFECTO_KEYSTORE}"
+  if [[ ${#SECRETOS_BLOQUEADOS[@]} -gt 0 ]]; then
+    local c
+    {
+      echo "ERROR: ya hay una instalación previa de este kit (${INSTALACION_PREVIA_MOTIVO}) y estas contraseñas siguen siendo las de defecto o están vacías:"
+      for c in "${SECRETOS_BLOQUEADOS[@]}"; do echo "  - ${c}"; done
+      cat <<'MENSAJE'
+El kit NO genera ni regenera contraseñas sobre una instalación existente: la base de datos y el keystore de
+Certify conservan las antiguas y, con otras nuevas, Certify dejaría de arrancar (o perdería el acceso a sus
+claves de firma). Tampoco existe ya KIT_CONSERVAR_SECRETOS_POR_DEFECTO. Rótelas a mano, una vez:
+  1. Genere una por cada una: openssl rand -hex 32   (sin $ \ ` " ' ni espacios).
+  2. Postgres: cambie la contraseña EN la base, con la instalación en marcha:
+       printf "ALTER USER <POSTGRES_USER> PASSWORD '<nueva>';\n" | docker compose $(cat generated/compose-args) exec -T database psql -U <POSTGRES_USER> -d <POSTGRES_DB>
+  3. Keystore: haga copia del volumen certify-pkcs12 y cambie la contraseña de local.p12:
+       docker compose $(cat generated/compose-args) run --rm --no-deps --entrypoint keytool certify \
+         -storepasswd -storetype PKCS12 -keystore /home/mosip/CERTIFY_PKCS12/local.p12
+     (el kit no ha probado este paso con un Certify real: no lo haga sin la copia).
+  4. Escriba las nuevas en POSTGRES_PASSWORD y KEYSTORE_PASSWORD del .env y vuelva a ejecutar.
+Detalle en institution-kit/docs/02-GUIA-DE-INSTALACION.md, sección «Secretos».
+MENSAJE
+    } >&2
+    exit 1
+  fi
   export POSTGRES_PASSWORD KEYSTORE_PASSWORD
   if [[ -n "${SECRETOS_GENERADOS}" ]]; then
     # Se persisten YA: otro script del kit (generate-properties.sh, compose…) tiene que ver los mismos.
     write_runtime_env
-    echo "AVISO: se generaron contraseñas aleatorias para la base de datos y/o el keystore (guardadas en generated/.env.runtime, modo 600). Solo valen para una instalación NUEVA; si ya tiene una base de datos o un keystore creados con otras contraseñas, lea la guía (instalación existente) antes de continuar." >&2
+    echo "AVISO: se generaron contraseñas aleatorias para la base de datos y/o el keystore (guardadas en generated/.env.runtime, modo 600). Solo valen para una instalación NUEVA; no se regeneran nunca más." >&2
   fi
 }
 
@@ -293,6 +373,9 @@ validate_env() {
     done
   fi
   validate_logo_path
+  # T7-3: los secretos se resuelven solo cuando todo lo demás es válido; un .env incorrecto no deja
+  # contraseñas nuevas en generated/.env.runtime.
+  resolve_secrets
 }
 
 # El logo de la credencial (R10): LOGO_PATH es obligatorio y tiene que ser un PNG. Una ruta relativa

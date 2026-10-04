@@ -96,7 +96,7 @@ case "${TLS_MODE}" in
 esac
 if [[ "${TLS_MODE}" != "proxy" ]]; then
   echo "Monitoreando logs de Caddy (30s) ..."
-  timeout 30 "${KIT_COMPOSE[@]}" logs -f caddy 2>/dev/null || true
+  kit_timeout 30 "${KIT_COMPOSE[@]}" logs -f caddy 2>/dev/null || true
 fi
 
 echo ""

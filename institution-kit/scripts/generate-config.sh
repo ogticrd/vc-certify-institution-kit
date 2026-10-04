@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 # Genera todo lo que el kit necesita en generated/ a partir del .env.
 #
-# SECRETOS (R9, D7): aquí se escribe generated/.env.runtime (modo 600) y, si POSTGRES_PASSWORD o la
+# SECRETOS (R9, D7; K2, K3): aquí se escribe generated/.env.runtime (modo 600) y, si POSTGRES_PASSWORD o la
 # contraseña del keystore (KEYSTORE_PASSWORD) valen el defecto (postgres / local) o están vacías, se
 # generan con `openssl rand -hex 32` y se guardan SOLO en ese fichero. Este script no imprime ninguna
-# contraseña ni el OAUTH_CLIENT_SECRET. La generación es para INSTALACIONES NUEVAS: la contraseña de
-# Postgres queda en el volumen de datos y la del keystore en el keystore de Certify; si ya existen,
-# cambiarla aquí rompe el arranque. En una instalación existente la institución fija
-# POSTGRES_PASSWORD (y KEYSTORE_PASSWORD) explícitamente con el valor que ya tiene la base (o
-# KIT_CONSERVAR_SECRETOS_POR_DEFECTO=1 para no generar). Las ya generadas se reutilizan en cada
-# ejecución (se leen de .env.runtime).
+# contraseña ni el OAUTH_CLIENT_SECRET. Solo se generan en una INSTALACIÓN NUEVA: la contraseña de
+# Postgres queda en el volumen de datos y la del keystore en el keystore de Certify. Con una instalación
+# previa (generated/.env.runtime, o un contenedor/volumen de este kit) las ya generadas se reutilizan, y si
+# siguen siendo las de defecto el kit se detiene y explica cómo rotarlas a mano (scripts/lib/common.sh,
+# resolve_secrets). Se resuelven después de validar el .env.
 
 set -euo pipefail
 
