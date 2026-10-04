@@ -375,7 +375,7 @@ exec "${process.execPath}" "$@"
       chmodSync(join(bin, "docker"), 0o755); chmodSync(join(bin, "curl"), 0o755); chmodSync(join(bin, "node"), 0o755);
       const r = e.ejecutar('bash install.sh', { PATH: `${bin}:${process.env.PATH}` });
       assert.equal(r.status, 0, r.stdout + r.stderr);
-      const llamadas = readFileSync(registro, "utf8").trim().split("\n").filter((l) => !l.startsWith("docker compose version"));
+      const llamadas = readFileSync(registro, "utf8").trim().split("\n").filter((l) => !l.startsWith("docker compose version") && !/^docker (ps -a -q|inspect|volume ls) /.test(l)); // T8: consultas de solo lectura de K2/T7-2
       assert.ok(llamadas.length >= 4);
       for (const l of llamadas) {
         assert.match(l, /^docker compose -f docker-compose\.yml -f docker-compose\.proxy\.yml --env-file generated\/\.env\.runtime /, l);

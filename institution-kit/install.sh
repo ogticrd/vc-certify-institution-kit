@@ -72,13 +72,21 @@ echo ""
 # superpuestos y contraseñas de generated/.env.runtime). Todo `docker compose` del kit la usa.
 load_compose_args
 
+# T7-2: una base en volumen anónimo (instalaciones anteriores) hay que migrarla antes de levantar nada.
+verificar_volumen_postgres
+
 echo ""
 echo "=== Construyendo imagen Certify (puede tardar varios minutos la primera vez) ==="
 "${KIT_COMPOSE[@]}" build
 
 echo ""
 echo "=== Levantando stack ==="
-"${KIT_COMPOSE[@]}" up -d
+# Con depends_on «service_healthy», `up -d` espera a que la base y Certify estén sanos; si uno no llega, compose
+# falla con un mensaje corto: se añade dónde mirar.
+"${KIT_COMPOSE[@]}" up -d || {
+  echo "ERROR: algún servicio no llegó a estar sano. Revise: ${KIT_COMPOSE[*]} ps  y  ${KIT_COMPOSE[*]} logs certify" >&2
+  exit 1
+}
 
 echo ""
 case "${TLS_MODE}" in
@@ -93,7 +101,7 @@ case "${TLS_MODE}" in
   *)
     echo "Caddy solicitará certificado Let's Encrypt (ACME HTTP-01)."
     echo "Modo IP: hostname ${IP_HOSTNAME:-} debe resolver a este servidor y el puerto 80 debe estar abierto."
-    echo "Si Caddy ya usó certificado interno antes, limpie el volumen: docker compose down && docker volume rm institution-kit_caddy_data"
+    echo "Si Caddy ya usó certificado interno antes, limpie solo su volumen (la base de datos NO se toca): ${KIT_COMPOSE[*]} rm -sf caddy && docker volume rm $(basename "${KIT_DIR}" | tr '[:upper:]' '[:lower:]')_caddy_data"
     ;;
 esac
 if [[ "${TLS_MODE}" != "proxy" ]]; then

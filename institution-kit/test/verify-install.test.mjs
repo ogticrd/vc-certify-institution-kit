@@ -502,7 +502,7 @@ exec "${process.execPath}" "$@"
       const iVer = r.stdout.indexOf("Resumen: simulado");
       const iFin = r.stdout.indexOf("Instalación completada");
       assert.ok(iDid !== -1 && iDid < iVer && iVer < iFin, `orden: did ${iDid}, verificación ${iVer}, fin ${iFin}`);
-      for (const l of readFileSync(registro, "utf8").trim().split("\n").filter((x) => !x.startsWith("docker compose version"))) {
+      for (const l of readFileSync(registro, "utf8").trim().split("\n").filter((x) => !x.startsWith("docker compose version") && !/^docker (ps -a -q|inspect|volume ls) /.test(x))) {
         assert.match(l, /^docker compose -f docker-compose\.yml -f docker-compose\.proxy\.yml --env-file generated\/\.env\.runtime /, l);
       }
     } finally { e.limpiar(); }

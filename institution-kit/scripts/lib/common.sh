@@ -276,6 +276,45 @@ instalacion_previa() {
   return 1
 }
 
+# T7-2: la base de datos de las instalaciones ANTERIORES vive en un volumen anónimo (la imagen de Postgres lo
+# declara y el compose no le daba nombre). Esta versión monta un volumen con nombre (pgdata) en la misma ruta: al
+# recrear el contenedor, Docker usaría un volumen NUEVO y vacío (initdb.d volvería a crear solo el esquema y la
+# credencial) y la base vieja quedaría huérfana: se perdería lo emitido (libro, estados). Si hay un contenedor de la
+# base cuyos datos están en un volumen anónimo, se detiene con los pasos para migrarlo. Sin Docker, sin contenedor
+# o con un volumen ya con nombre, no hace nada.
+verificar_volumen_postgres() {
+  command -v docker >/dev/null 2>&1 || return 0
+  local id nombre proyecto usuario
+  id="$(kit_timeout 10 docker ps -a -q --filter "label=com.docker.compose.service=database" \
+    --filter "label=com.docker.compose.project.working_dir=${KIT_DIR}" 2>/dev/null | head -n1 || true)"
+  [[ -n "${id}" ]] || return 0
+  nombre="$(kit_timeout 10 docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' "${id}" 2>/dev/null || true)"
+  [[ "${nombre}" =~ ^[0-9a-f]{64}$ ]] || return 0
+  proyecto="${COMPOSE_PROJECT_NAME:-$(basename "${KIT_DIR}" | tr '[:upper:]' '[:lower:]')}"
+  usuario="${POSTGRES_USER:-postgres}"
+  {
+    echo "ERROR: la base de datos de esta instalación vive en un volumen ANÓNIMO de Docker (${nombre})."
+    cat <<MENSAJE
+Esta versión del kit guarda los datos de Postgres en un volumen con nombre (${proyecto}_pgdata) para que
+«docker compose down» + «up» no deje una base vacía. Si actualiza sin migrar, Docker crea ese volumen VACÍO,
+la base nueva solo trae el esquema y la credencial, y se pierde lo ya emitido (libro de emisiones, estados);
+la base vieja queda huérfana. Migre una vez (el kit no ha ejecutado estos pasos con un Docker real: haga la copia):
+  1. Copia de seguridad:
+       docker compose \$(cat generated/compose-args) exec -T database pg_dumpall -U ${usuario} > respaldo-postgres.sql
+  2. Pare la base:
+       docker compose \$(cat generated/compose-args) stop database
+  3. Cree el contenedor con el volumen nuevo (sin arrancarlo):
+       docker compose \$(cat generated/compose-args) up --no-start database
+  4. Copie los datos del volumen anónimo al nuevo:
+       docker run --rm -v ${nombre}:/desde:ro -v ${proyecto}_pgdata:/hacia alpine sh -c 'cp -a /desde/. /hacia/'
+  5. Vuelva a ejecutar ./install.sh. El volumen anónimo viejo queda en Docker hasta que lo borre a mano
+     (docker volume rm ${nombre}) cuando compruebe que todo funciona.
+Detalle en institution-kit/docs/02-GUIA-DE-INSTALACION.md, sección «Actualizar».
+MENSAJE
+  } >&2
+  exit 1
+}
+
 # Deja en $1 (nombre de variable) la contraseña a usar para $2 (clave en .env.runtime) cuyo valor por
 # defecto es $3. Marca SECRETOS_GENERADOS=1 si tuvo que generar una; si hace falta generar pero hay una
 # instalación previa, anota la clave en SECRETOS_BLOQUEADOS (resolve_secrets se detiene).

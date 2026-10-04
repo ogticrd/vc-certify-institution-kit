@@ -1,11 +1,18 @@
 services:
   database:
     image: postgres:15
+    # K13: tras reiniciar el servidor o un fallo, vuelve solo (hasta que alguien lo pare a propósito).
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-inji_certify}
     volumes:
+      # T7-2: volumen con NOMBRE para los datos. La imagen declara su volumen en esta ruta; sin nombre era anónimo y
+      # `docker compose down` + `up` creaba otro VACÍO (el initdb.d solo corre en una base nueva). Con nombre, `down`
+      # conserva los datos; solo `down -v` o `docker volume rm` los borra. Una instalación anterior (volumen anónimo)
+      # se migra a mano: install.sh se detiene y lo explica (common.sh, verificar_volumen_postgres).
+      - pgdata:/var/lib/postgresql/data
       - ./sql/00-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       - ./generated/credential_config.sql:/docker-entrypoint-initdb.d/02-credential_config.sql:ro
     healthcheck:
@@ -20,6 +27,15 @@ services:
     build:
       context: ..
       dockerfile: institution-kit/Dockerfile
+    restart: unless-stopped
+    # K13: el health interno del actuator (sin token: /actuator/** va en ignore-auth-urls; sale 503 con DOWN y wget
+    # falla). La imagen instala wget (Dockerfile). Spring + el keystore tardan: arranque largo antes de contar fallos.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8090/v1/certify/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
     environment:
       - container_user=mosip
       - active_profile_env=default,institution
@@ -63,6 +79,7 @@ services:
 
   caddy:
     image: caddy:2-alpine
+    restart: unless-stopped
     # Los puertos NO se declaran aquí: dependen del modo y los pone el fichero superpuesto
     # (docker-compose.tls.yml: 80 y 443; docker-compose.proxy.yml: solo CADDY_HTTP_PORT). La orden
     # exacta queda escrita en generated/compose-args; install.sh y los demás scripts la usan.
@@ -76,8 +93,17 @@ services:
       - ./generated/logos:/srv/logos:ro
       - caddy_data:/data
       - caddy_config:/config
+    # K13: Caddy arranca cuando Certify ya está sano. (La API de administración de Caddy, localhost:2019 dentro del
+    # contenedor, es la que usa el healthcheck: no depende de Certify ni de los certificados.)
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
-      - certify
+      certify:
+        condition: service_healthy
     networks:
       - certify-net
 
@@ -86,6 +112,7 @@ networks:
     driver: bridge
 
 volumes:
+  pgdata:
   caddy_data:
   caddy_config:
   certify-pkcs12:
