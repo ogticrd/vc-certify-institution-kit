@@ -299,17 +299,22 @@ describe("compose por modo: ficheros superpuestos (D5)", () => {
 
 describe("domain e ip: sin cambios de comportamiento frente a la línea base de T3 (fixtures)", () => {
   // Los fixtures son el Caddyfile que generaba el kit en el commit 743540e (fin de T3), con el mismo
-  // .env de prueba. Lo único que T5 cambia en domain e ip es `remote_ip` → `client_ip` en el matcher
-  // del health del actuator (idéntico sin proxies de confianza) y los comentarios que lo explican.
+  // .env de prueba. T8 (K8) cambió A PROPÓSITO el fragmento de rutas `(certify_comun)` (lista blanca en vez de
+  // `handle /v1/certify/*`, 404 final: ver caddy-lista-blanca.test.mjs), así que ya no se compara el fragmento
+  // entero. Lo que sigue sin cambiar frente a la línea base, y se compara, es TODO lo de fuera del fragmento
+  // (bloque global con el correo, bloque del sitio con su `import`). T5 solo cambió `remote_ip`→`client_ip`
+  // (en el fragmento).
+  const sinFragmento = (c) => c.replace(/^\(certify_comun\) \{\n[\s\S]*?\n\}\n/m, "");
   for (const modo of ["domain", "ip"]) {
-    test(`Caddyfile ${modo}: idéntico a la línea base salvo remote_ip→client_ip y comentarios`, () => {
+    test(`Caddyfile ${modo}: lo de fuera del fragmento de rutas es idéntico a la línea base de T3`, () => {
       const e = prepararEntorno({ modo });
       try {
         assert.equal(e.salida.status, 0, e.salida.stderr);
-        const antes = vivo(readFileSync(join(AQUI, "fixtures", "linea-base-t3", `Caddyfile.${modo}`), "utf8"));
-        const ahora = vivo(e.leer("caddyfile"));
-        assert.equal(ahora.replace("@interno client_ip private_ranges", "@interno remote_ip private_ranges"), antes);
-        assert.equal((ahora.match(/client_ip/g) ?? []).length, 1);
+        const antes = vivo(sinFragmento(readFileSync(join(AQUI, "fixtures", "linea-base-t3", `Caddyfile.${modo}`), "utf8")));
+        const ahora = vivo(sinFragmento(e.leer("caddyfile")));
+        assert.equal(ahora, antes);
+        assert.ok(ahora.length > 20, "algo se comparó");
+        assert.equal((vivo(e.leer("caddyfile")).match(/client_ip/g) ?? []).length, 1);
       } finally { e.limpiar(); }
     });
   }

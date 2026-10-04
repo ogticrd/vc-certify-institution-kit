@@ -112,8 +112,10 @@ for (const modo of ["domain", "ip"]) {
     // actuator. El detalle de las rutas nuevas está en caddy-did-logos.test.mjs.
     test("el Caddyfile conserva la metadata del emisor y el proxy a Certify, y añade did.json/contextos/logos/actuator (T3)", () => {
       const c = e.leer("caddyfile");
-      assert.match(c, /route \/\.well-known\/openid-credential-issuer \{\n\t\trewrite \* \/v1\/certify\/\.well-known\/openid-credential-issuer\n\t\treverse_proxy certify:8090/);
-      assert.match(c, /handle \/v1\/certify\/\* \{\n\t\treverse_proxy certify:8090/);
+      // T8 (K8): la metadata es un `handle` (antes `route`) y /v1/certify/* ya no se publica entero: lista blanca
+      // (ver caddy-lista-blanca.test.mjs).
+      assert.match(c, /handle \/\.well-known\/openid-credential-issuer \{\n\t\trewrite \* \/v1\/certify\/\.well-known\/openid-credential-issuer\n\t\treverse_proxy certify:8090/);
+      assert.match(c, /handle \/v1\/certify\/issuance\/credential \{/);
       assert.match(c, /\/contextos\/\*/);
       assert.match(c, /\/logos\/\*/);
       assert.match(c, /\/v1\/certify\/actuator\*/);

@@ -34,14 +34,25 @@ mosip.certify.security.auth.get-urls={}
 
 # Paths are relative to server.servlet.path (/v1/certify). Use leading "/" so
 # Spring Security 6 MvcRequestMatcher matches (**/actuator/** does not).
+#
+# K8: SOLO lo que el kit usa queda sin autenticación en Certify; todo lo demás exige un token válido de
+# Cuenta Única (anyRequest().authenticated()). Antes se dejaban abiertas /oauth/**, /pre-authorized-data/**,
+# /credential-offer-data/** (flujo pre-autorizado: emite credenciales SIN ciudadano), /credential-configurations/**
+# (reescribe la plantilla y el contexto), /credentials/** (revocación), /system-info/**, /ledger-search/**,
+# /swagger-ui/** y /v3/api-docs/**. Caddy ya no las publica (templates/Caddyfile.comun.inc) y aquí tampoco se
+# abren: dos cerrojos, como en el emisor propio (inji-vc/stack/config/certify-soyyord.properties).
+#  - /actuator/**: el health interno se pide sin token (con exposure.include=health no hay otro endpoint);
+#  - /error, /favicon.ico: páginas de error de Spring;
+#  - /issuance/credential: el endpoint de emisión; el token lo valida AccessTokenValidationFilter
+#    (mosip.certify.authn.filter-urls, más abajo). Solo esa ruta, no /issuance/**;
+#  - /.well-known/**: metadata, DID y JWKS;
+#  - /credentials/status-list/**: lista de estado pública (solo lectura, GET);
+#  - /rendering-template/**: plantilla de presentación (solo lectura, GET).
 mosip.certify.security.ignore-csrf-urls=/actuator/**,/favicon.ico,/error,\
-  /swagger-ui/**,/v3/api-docs/**,\
-  /issuance/**,/credential-configurations/**,/.well-known/**,/ledger-search/**,/credentials/**,\
-  /oauth/**,/pre-authorized-data/**,/credential-offer-data/**
+  /issuance/credential,/.well-known/**
 
-mosip.certify.security.ignore-auth-urls=/actuator/**,/error,/swagger-ui/**,\
-  /v3/api-docs/**,/issuance/**,/rendering-template/**,/system-info/**,/credential-configurations/**,\
-  /.well-known/**,/ledger-search/**,/credentials/**,/oauth/**,/pre-authorized-data/**,/credential-offer-data/**
+mosip.certify.security.ignore-auth-urls=/actuator/**,/error,/issuance/credential,/rendering-template/**,\
+  /.well-known/**,/credentials/status-list/**
 
 mosip.certify.security.cors-enabled-get-method-urls=/rendering-template/**
 

@@ -79,7 +79,8 @@ for (const modo of ["domain", "ip"]) {
     });
 
     test("R1: /contextos/* se sirve desde /srv/contextos con no-cache y application/ld+json", () => {
-      const b = bloque(c, "handle_path /contextos/*");
+      const b = bloque(c, "handle /contextos/*");
+      assert.match(b, /uri strip_prefix \/contextos/);
       assert.match(b, /root \* \/srv\/contextos/);
       assert.match(b, /header Cache-Control "no-cache"/);
       assert.match(b, /header Content-Type "application\/ld\+json"/);
@@ -88,7 +89,8 @@ for (const modo of ["domain", "ip"]) {
     });
 
     test("R10: /logos/* se sirve desde /srv/logos con no-cache e image/png", () => {
-      const b = bloque(c, "handle_path /logos/*");
+      const b = bloque(c, "handle /logos/*");
+      assert.match(b, /uri strip_prefix \/logos/);
       assert.match(b, /root \* \/srv\/logos/);
       assert.match(b, /header Cache-Control "no-cache"/);
       assert.match(b, /header Content-Type "image\/png"/);
@@ -109,15 +111,15 @@ for (const modo of ["domain", "ip"]) {
       // La regla específica (health) va antes que el comodín, y ambas antes del proxy general de Certify.
       const iSalud = c.indexOf("handle /v1/certify/actuator/health");
       const iComodin = c.indexOf("handle /v1/certify/actuator*");
-      const iGeneral = c.indexOf("handle /v1/certify/* {");
+      const iGeneral = c.indexOf("handle /v1/certify/.well-known/openid-credential-issuer {");
       assert.ok(iSalud < iComodin && iComodin < iGeneral);
       // El único matcher de IP es el de rangos privados.
       assert.doesNotMatch(c, /(client_ip|remote_ip) (?!private_ranges)/);
     });
 
-    test("la metadata del emisor y el resto de /v1/certify/* siguen yendo a Certify", () => {
-      assert.match(c, /route \/\.well-known\/openid-credential-issuer \{\n\t\trewrite \* \/v1\/certify\/\.well-known\/openid-credential-issuer\n\t\treverse_proxy certify:8090\n\t\}/);
-      assert.match(c, /handle \/v1\/certify\/\* \{\n\t\treverse_proxy certify:8090\n\t\}/);
+    test("la metadata del emisor sigue yendo a Certify; el resto de /v1/certify/* es lista blanca (K8)", () => {
+      assert.match(c, /handle \/\.well-known\/openid-credential-issuer \{\n\t\trewrite \* \/v1\/certify\/\.well-known\/openid-credential-issuer\n\t\treverse_proxy certify:8090\n\t\}/);
+      assert.match(c, /handle \/v1\/certify\/\* \{\n\t\trespond 404\n\t\}/);
     });
 
     test("no-cache en las tres rutas que sirven ficheros", () => {
