@@ -2,14 +2,11 @@
 	email $CADDY_ACME_EMAIL
 }
 
+# Fragmento `certify_comun` (templates/Caddyfile.comun.inc): actuator, did.json, contextos, logos y
+# proxy a Certify. generate-caddy.sh lo inserta aquí, ANTES del bloque de sitio: Caddy exige que un
+# fragmento esté definido antes de importarlo.
+$CADDY_FRAGMENTO_COMUN
+
 $IP_HOSTNAME {
-	route /.well-known/did.json {
-		rewrite * /v1/certify/.well-known/did.json
-		reverse_proxy certify:8090
-	}
-	route /.well-known/openid-credential-issuer {
-		rewrite * /v1/certify/.well-known/openid-credential-issuer
-		reverse_proxy certify:8090
-	}
-	reverse_proxy /v1/certify/* certify:8090
+	import certify_comun
 }

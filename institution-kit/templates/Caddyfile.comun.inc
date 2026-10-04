@@ -1,0 +1,81 @@
+# ---------------------------------------------------------------------------------------------
+# Rutas comunes a todos los modos (domain, ip y, en T5, proxy). generate-caddy.sh lo inserta en el
+# Caddyfile de cada modo (variable CADDY_FRAGMENTO_COMUN), antes del bloque de sitio; cada plantilla
+# de modo lo usa con `import certify_comun` dentro de su bloque de sitio. Así hay UNA sola copia de
+# la lógica de rutas.
+#
+# Procedencia: forma tomada del Caddyfile del emisor propio (inji-vc/stack/Caddyfile, 4-oct-2026):
+# actuator bloqueado, did.json como fichero, /contextos y /logos con no-cache.
+#
+# Montajes de docker-compose.yml (solo lectura):
+#   ./generated/did       -> /srv/did        (did.json corregido; lo escribe generate-did.sh)
+#   ./generated/contextos -> /srv/contextos  (contexto JSON-LD propio; generate-context.sh)
+#   ./generated/logos     -> /srv/logos      (logo PNG de la institución; generate-logo.sh)
+# Se montan las tres carpetas por separado y NO generated/ entera: ahí vive .env.runtime (secretos).
+# ---------------------------------------------------------------------------------------------
+(certify_comun) {
+	# El actuator NO se publica (R9). Solo `health`, y solo desde rangos privados (la red de Docker
+	# y localhost); desde internet es 404, como todo lo demás del actuator. Un comodín en MEDIO de la
+	# ruta no casa en Caddy: las rutas van explícitas. Defensa en profundidad: Certify además solo
+	# expone `health` (T4).
+	handle /v1/certify/actuator/health {
+		@interno remote_ip private_ranges
+		handle @interno {
+			reverse_proxy certify:8090
+		}
+		handle {
+			respond 404
+		}
+	}
+	handle /v1/certify/actuator* {
+		respond 404
+	}
+
+	route /.well-known/openid-credential-issuer {
+		rewrite * /v1/certify/.well-known/openid-credential-issuer
+		reverse_proxy certify:8090
+	}
+
+	# DID: si existe el fichero corregido (generate-did.sh, que corre cuando Certify ya está UP) se
+	# sirve ese, con no-cache; si no existe todavía, se reescribe al DID de Certify (sin corregir:
+	# assertionMethod con el DID pelado) para que el arranque no quede roto.
+	handle /.well-known/did.json {
+		@corregido file {
+			root /srv/did
+			try_files /did.json
+		}
+		handle @corregido {
+			root * /srv/did
+			rewrite * /did.json
+			header Cache-Control "no-cache"
+			header Content-Type "application/json"
+			file_server
+		}
+		handle {
+			rewrite * /v1/certify/.well-known/did.json
+			reverse_proxy certify:8090
+		}
+	}
+
+	# El @context propio de la credencial, que la firma necesita poder descargar. Con no-cache el
+	# cliente guarda su copia pero la revalida siempre (304 si no cambió); sin él, un verificador
+	# puede seguir usando un contexto viejo en caché durante un tiempo que calcula él.
+	handle_path /contextos/* {
+		root * /srv/contextos
+		header Cache-Control "no-cache"
+		header Content-Type "application/ld+json"
+		file_server
+	}
+
+	# El logo de la credencial, referenciado desde su bloque `display`.
+	handle_path /logos/* {
+		root * /srv/logos
+		header Cache-Control "no-cache"
+		header Content-Type "image/png"
+		file_server
+	}
+
+	handle /v1/certify/* {
+		reverse_proxy certify:8090
+	}
+}

@@ -151,7 +151,8 @@ export function leerEntrada(env, { paraSql = false } = {}) {
     urlContexto: `${urlPublica}/contextos/${clave}.json`,
     didUrl: texto("DID_URL", `did:web:${host}`),
     nombreVisible: texto("CREDENTIAL_DISPLAY_NAME", texto("INSTITUTION_DISPLAY_NAME", clave)),
-    logoUrl: texto("CREDENTIAL_LOGO_URL", ""),
+    // R10: el logo lo sirve el propio kit (scripts/generate-logo.sh copia LOGO_PATH a esa ruta).
+    logoUrl: `${urlPublica}/logos/${clave}.png`,
     colorFondo: texto("CREDENTIAL_BG_COLOR", "#12107c"),
     colorTexto: texto("CREDENTIAL_TEXT_COLOR", "#FFFFFF"),
     scope: paraSql ? sinControl(pide("CREDENTIAL_SCOPE"), "CREDENTIAL_SCOPE") : "",

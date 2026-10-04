@@ -60,6 +60,12 @@ services:
       - "443:443"
     volumes:
       - ./generated/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Lo que Caddy sirve como fichero (solo lectura). Carpetas, no ficheros: un fichero que aún no
+      # existe (el did.json se genera con Certify ya en marcha) no se puede montar. NO se monta
+      # generated/ entera: ahí vive .env.runtime, con secretos.
+      - ./generated/did:/srv/did:ro
+      - ./generated/contextos:/srv/contextos:ro
+      - ./generated/logos:/srv/logos:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

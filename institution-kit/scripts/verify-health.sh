@@ -18,10 +18,13 @@ BASE_URL="${CERTIFY_PUBLIC_URL}"
 MAX_ATTEMPTS=60
 SLEEP_SECS=5
 
-echo "Verificando health en ${BASE_URL}/v1/certify/actuator/health ..."
+# El actuator ya no se publica en internet (R9): Caddy responde 404 a /v1/certify/actuator/* salvo
+# `health` desde rangos privados. El health se pregunta por la red interna, desde el contenedor de
+# Caddy a Certify; el resto de comprobaciones va por la URL pública.
+echo "Verificando health de Certify (red interna) ..."
 
 for ((i = 1; i <= MAX_ATTEMPTS; i++)); do
-  if response=$(curl -sf "${CURL_OPTS[@]}" "${BASE_URL}/v1/certify/actuator/health" 2>/dev/null); then
+  if response=$(cd "${KIT_DIR}" && docker compose exec -T caddy wget -qO- http://certify:8090/v1/certify/actuator/health 2>/dev/null); then
     status=$(echo "${response}" | jq -r '.status // empty')
     if [[ "${status}" == "UP" ]]; then
       echo "  Health: UP"

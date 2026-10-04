@@ -81,6 +81,20 @@ echo "=== Verificando endpoints ==="
 export CERTIFY_PUBLIC_URL TLS_MODE
 "${KIT_DIR}/scripts/verify-health.sh"
 
+# El DID corregido (R5) necesita a Certify en marcha: lleva su clave pública. Hasta ahora Caddy servía
+# el DID de Certify sin corregir (assertionMethod con el DID pelado); desde aquí, el corregido.
+echo ""
+echo "=== Corrigiendo el DID (assertionMethod) ==="
+"${KIT_DIR}/scripts/generate-did.sh"
+
+echo "Comprobando ${CERTIFY_PUBLIC_URL}/.well-known/did.json ..."
+did_publicado="$(curl -sf "${CERTIFY_PUBLIC_URL}/.well-known/did.json" || true)"
+if ! echo "${did_publicado}" | jq -e '(.assertionMethod | length > 0) and all(.assertionMethod[]; (type == "object" and has("id")) or (type == "string" and test("#")))' >/dev/null 2>&1; then
+  echo "ERROR: el did.json publicado no tiene assertionMethod con el id de la clave (¿Caddy lo sirve desde generated/did?)." >&2
+  exit 1
+fi
+echo "  did.json: assertionMethod conforme"
+
 echo ""
 echo "============================================"
 echo " Instalación completada"
@@ -91,6 +105,7 @@ echo " OAUTH_CLIENT_ID:    ${OAUTH_CLIENT_ID}"
 echo " CREDENTIAL:         ${CREDENTIAL_CONFIG_KEY_ID}"
 echo ""
 echo " Envíe estos datos a OGTIC para registro en Mimoto central."
-echo " Health: ${CERTIFY_PUBLIC_URL}/v1/certify/actuator/health"
+echo " Health: solo por la red interna (el actuator no se publica en internet)"
+echo " DID:    ${CERTIFY_PUBLIC_URL}/.well-known/did.json"
 echo " Issuer: ${CERTIFY_PUBLIC_URL}/.well-known/openid-credential-issuer"
 echo "============================================"

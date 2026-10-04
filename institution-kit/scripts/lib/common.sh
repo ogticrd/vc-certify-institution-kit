@@ -59,7 +59,6 @@ apply_defaults() {
   # El contexto ya no es una entrada: lo genera el kit (scripts/generate-context.mjs).
   CREDENTIAL_TYPE="${CREDENTIAL_TYPE:-VerifiableCredential,${INSTITUTION_ID}Credential}"
   CREDENTIAL_FORMAT="${CREDENTIAL_FORMAT:-ldp_vc}"
-  CREDENTIAL_LOGO_URL="${CREDENTIAL_LOGO_URL:-https://mosip.github.io/inji-config/logos/agro-vertias-logo.png}"
   CREDENTIAL_BG_COLOR="${CREDENTIAL_BG_COLOR:-#12107c}"
   CREDENTIAL_TEXT_COLOR="${CREDENTIAL_TEXT_COLOR:-#FFFFFF}"
   if [[ -z "${RESTAPI_SCOPE_ENDPOINT_MAPPING:-}" ]]; then
@@ -69,7 +68,7 @@ apply_defaults() {
   POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postgres}"
   POSTGRES_DB="${POSTGRES_DB:-inji_certify}"
   export CREDENTIAL_DISPLAY_NAME CREDENTIAL_TYPE CREDENTIAL_FORMAT
-  export CREDENTIAL_LOGO_URL CREDENTIAL_BG_COLOR CREDENTIAL_TEXT_COLOR
+  export CREDENTIAL_BG_COLOR CREDENTIAL_TEXT_COLOR
   export RESTAPI_SCOPE_ENDPOINT_MAPPING POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
 }
 
@@ -137,6 +136,35 @@ validate_env() {
     echo "ERROR: Configure OAUTH_CLIENT_SECRET con el valor provisto por OGTIC." >&2
     exit 1
   fi
+  validate_logo_path
+}
+
+# El logo de la credencial (R10): LOGO_PATH es obligatorio y tiene que ser un PNG. Una ruta relativa
+# se resuelve desde el directorio del kit. Deja la ruta absoluta en LOGO_PATH_RESOLVED.
+# La firma PNG son los 8 bytes 89 50 4E 47 0D 0A 1A 0A.
+validate_logo_path() {
+  if [[ -n "${CREDENTIAL_LOGO_URL:-}" ]]; then
+    echo "ERROR: CREDENTIAL_LOGO_URL ya no existe: el logo lo sirve el propio kit. Quítela del .env y use LOGO_PATH=<ruta a un PNG>." >&2
+    exit 1
+  fi
+  if [[ -z "${LOGO_PATH:-}" ]]; then
+    echo "ERROR: LOGO_PATH es obligatorio: ruta a un fichero PNG con el logo de su institución (se muestra en la cartera del ciudadano)." >&2
+    exit 1
+  fi
+  local candidato="${LOGO_PATH}"
+  [[ "${candidato}" == /* ]] || candidato="${KIT_DIR}/${candidato}"
+  if [[ ! -f "${candidato}" || ! -r "${candidato}" ]]; then
+    echo "ERROR: LOGO_PATH no apunta a un fichero legible: ${LOGO_PATH}" >&2
+    exit 1
+  fi
+  local firma
+  firma="$(head -c 8 "${candidato}" | od -An -tx1 | tr -d ' \n')"
+  if [[ "${firma}" != "89504e470d0a1a0a" ]]; then
+    echo "ERROR: LOGO_PATH no es un PNG (la cabecera del fichero no es la de un PNG): ${LOGO_PATH}" >&2
+    exit 1
+  fi
+  LOGO_PATH_RESOLVED="${candidato}"
+  export LOGO_PATH_RESOLVED
 }
 
 write_runtime_env() {
@@ -158,7 +186,6 @@ CREDENTIAL_SCOPE=${CREDENTIAL_SCOPE}
 CREDENTIAL_DISPLAY_NAME=${CREDENTIAL_DISPLAY_NAME}
 CREDENTIAL_TYPE=${CREDENTIAL_TYPE}
 CREDENTIAL_FORMAT=${CREDENTIAL_FORMAT}
-CREDENTIAL_LOGO_URL=${CREDENTIAL_LOGO_URL}
 CREDENTIAL_BG_COLOR=${CREDENTIAL_BG_COLOR}
 CREDENTIAL_TEXT_COLOR=${CREDENTIAL_TEXT_COLOR}
 RESTAPI_SCOPE_ENDPOINT_MAPPING=${RESTAPI_SCOPE_ENDPOINT_MAPPING}
@@ -175,7 +202,7 @@ export_env_for_templates() {
   export OAUTH_CLIENT_ID OAUTH_CLIENT_SECRET
   export CREDENTIAL_CONFIG_KEY_ID CREDENTIAL_ATTRIBUTES CREDENTIAL_SCOPE
   export CREDENTIAL_DISPLAY_NAME CREDENTIAL_TYPE CREDENTIAL_FORMAT
-  export CREDENTIAL_LOGO_URL CREDENTIAL_BG_COLOR CREDENTIAL_TEXT_COLOR CREDENTIAL_LABELS_JSON CREDENTIAL_ATTRIBUTE_LABELS
+  export LOGO_PATH CREDENTIAL_BG_COLOR CREDENTIAL_TEXT_COLOR CREDENTIAL_LABELS_JSON CREDENTIAL_ATTRIBUTE_LABELS
   export RESTAPI_SCOPE_ENDPOINT_MAPPING POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
   export CADDY_ACME_EMAIL
 }
@@ -184,7 +211,7 @@ export_env_for_templates() {
 # contenedor cuando no hay Node local.
 NODE_ENV_VARS=(
   CREDENTIAL_CONFIG_KEY_ID CREDENTIAL_ATTRIBUTES CREDENTIAL_TYPE CREDENTIAL_LABELS_JSON
-  CREDENTIAL_ATTRIBUTE_LABELS CREDENTIAL_DISPLAY_NAME CREDENTIAL_LOGO_URL CREDENTIAL_BG_COLOR
+  CREDENTIAL_ATTRIBUTE_LABELS CREDENTIAL_DISPLAY_NAME CREDENTIAL_BG_COLOR
   CREDENTIAL_TEXT_COLOR CREDENTIAL_SCOPE CREDENTIAL_FORMAT CERTIFY_PUBLIC_URL DID_URL
   INSTITUTION_ID INSTITUTION_DISPLAY_NAME
 )

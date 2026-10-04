@@ -13,6 +13,12 @@ apply_defaults
 derive_public_url
 export_env_for_templates
 
+# Las rutas comunes a todos los modos (actuator, did.json, contextos, logos, certify) están en UN
+# fragmento, templates/Caddyfile.comun.inc; las plantillas de modo lo reciben en $CADDY_FRAGMENTO_COMUN
+# (envsubst no vuelve a expandir lo sustituido) y lo importan con `import certify_comun`.
+CADDY_FRAGMENTO_COMUN="$(cat "${KIT_DIR}/templates/Caddyfile.comun.inc")"
+export CADDY_FRAGMENTO_COMUN
+
 OUT_FILE="${GENERATED_DIR}/caddy/Caddyfile"
 mkdir -p "$(dirname "${OUT_FILE}")"
 
@@ -23,13 +29,13 @@ case "${TLS_MODE}" in
     render_template \
       "${KIT_DIR}/templates/Caddyfile.domain.tpl" \
       "${OUT_FILE}" \
-      '$CERTIFY_PUBLIC_HOST $CADDY_ACME_EMAIL'
+      '$CERTIFY_PUBLIC_HOST $CADDY_ACME_EMAIL $CADDY_FRAGMENTO_COMUN'
     ;;
   ip)
     render_template \
       "${KIT_DIR}/templates/Caddyfile.ip.tpl" \
       "${OUT_FILE}" \
-      '$IP_HOSTNAME $CADDY_ACME_EMAIL'
+      '$IP_HOSTNAME $CADDY_ACME_EMAIL $CADDY_FRAGMENTO_COMUN'
     ;;
   *)
     echo "ERROR: TLS_MODE inválido: ${TLS_MODE}" >&2
