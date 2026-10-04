@@ -29,6 +29,15 @@ if [[ "${TLS_MODE}" != "proxy" && -z "${CADDY_ACME_EMAIL:-}" ]]; then
   exit 1
 fi
 
+# K7: guarda de última línea. Aunque la validación de nombres y correo ya corrió, nada con «{», «}» ni saltos de
+# línea entra al Caddyfile (cerrarían o abrirían bloques: un sitio inyectado).
+case "${TLS_MODE}" in
+  domain) caddy_valor_seguro CERTIFY_PUBLIC_HOST "${CERTIFY_PUBLIC_HOST}" || exit 1 ;;
+  ip) caddy_valor_seguro IP_HOSTNAME "${IP_HOSTNAME}" || exit 1 ;;
+  proxy) caddy_valor_seguro TRUSTED_PROXIES "${TRUSTED_PROXIES}" || exit 1 ;;
+esac
+[[ "${TLS_MODE}" == "proxy" ]] || caddy_valor_seguro CADDY_ACME_EMAIL "${CADDY_ACME_EMAIL}" || exit 1
+
 case "${TLS_MODE}" in
   domain)
     render_template \

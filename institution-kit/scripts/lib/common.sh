@@ -48,15 +48,56 @@ ensure_generated_dir() {
   chmod 700 "${GENERATED_DIR}"
 }
 
+# --- Nombres públicos y correo (K7) -------------------------------------------------------------------
+# Todo esto acaba en el Caddyfile, las properties, el DID y las URL del contexto: un nombre con barra final,
+# puerto, mayúsculas, acentos o saltos de línea da una identidad distinta según dónde se lea (o inyecta
+# directivas de Caddy). Se valida ANTES de escribir nada.
+
+# Texto del valor sin caracteres de control, para poder citarlo en un mensaje sin que un salto de línea lo parta.
+_citar() { printf '%s' "${1//[[:cntrl:]]/ }"; }
+
+# Hostname ASCII en minúsculas, con al menos dos etiquetas (un dominio completo), sin puerto ni esquema ni ruta.
+_es_hostname() {
+  [[ "$1" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]]
+}
+
+# IPv4 en decimal, sin ceros a la izquierda, cada octeto 0-255.
+_es_ipv4() {
+  local ip="$1" o
+  [[ "${ip}" =~ ^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$ ]] || return 1
+  local IFS=.
+  for o in ${ip}; do (( 10#${o} <= 255 )) || return 1; done
+}
+
+validate_public_host() {
+  local v="${CERTIFY_PUBLIC_HOST}"
+  if ! _es_hostname "${v}"; then
+    local pista="Escriba solo el nombre de dominio, en minúsculas y sin https://, sin barra final, sin ruta ni «@» (por ejemplo certify.suinstitucion.gob.do)."
+    [[ "${v}" == *:* && "${v}" != *://* && "${v}" != *@* ]] && pista="${pista} Con puerto no: en domain Caddy usa el 80 y el 443; para otro puerto use TLS_MODE=proxy con CERTIFY_PUBLIC_URL."
+    [[ "${v}" =~ [^\ -~] ]] && pista="${pista} Un nombre con acentos va en punycode (xn--…, p. ej. xn--emisin-fxa.gob.do)."
+    echo "ERROR: CERTIFY_PUBLIC_HOST no es un nombre de dominio válido (valor: $(_citar "${v}")). ${pista}" >&2
+    exit 1
+  fi
+}
+
 derive_public_url() {
   case "${TLS_MODE:-}" in
     domain)
       [[ -n "${CERTIFY_PUBLIC_HOST:-}" ]] || { echo "ERROR: CERTIFY_PUBLIC_HOST es obligatorio con TLS_MODE=domain" >&2; exit 1; }
+      validate_public_host
       CERTIFY_PUBLIC_URL="https://${CERTIFY_PUBLIC_HOST}"
       ;;
     ip)
       [[ -n "${SERVER_PUBLIC_IP:-}" ]] || { echo "ERROR: SERVER_PUBLIC_IP es obligatorio con TLS_MODE=ip" >&2; exit 1; }
+      if ! _es_ipv4 "${SERVER_PUBLIC_IP}"; then
+        echo "ERROR: SERVER_PUBLIC_IP no es una dirección IPv4 válida (valor: $(_citar "${SERVER_PUBLIC_IP}")). Escriba la IP pública del servidor, p. ej. 203.0.113.10 (sin máscara ni espacios)." >&2
+        exit 1
+      fi
       local provider="${IP_DNS_PROVIDER:-sslip.io}"
+      if ! _es_hostname "${provider}"; then
+        echo "ERROR: IP_DNS_PROVIDER no es un nombre de dominio válido (valor: $(_citar "${provider}")). Use sslip.io o nip.io, en minúsculas." >&2
+        exit 1
+      fi
       local ip_dashes="${SERVER_PUBLIC_IP//./-}"
       IP_HOSTNAME="${ip_dashes}.${provider}"
       CERTIFY_PUBLIC_URL="https://${IP_HOSTNAME}"
@@ -78,6 +119,25 @@ derive_public_url() {
   export CERTIFY_PUBLIC_URL IP_HOSTNAME
 }
 
+# El correo de ACME (Let's Encrypt): una sola dirección, sin espacios, comas ni saltos de línea (entra tal cual
+# al bloque global del Caddyfile).
+validate_acme_email() {
+  local v="${CADDY_ACME_EMAIL:-}"
+  if ! [[ "${v}" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]]; then
+    echo "ERROR: CADDY_ACME_EMAIL no es una dirección de correo válida (valor: $(_citar "${v}")). Una sola dirección, sin espacios ni saltos de línea, p. ej. infra@suinstitucion.gob.do." >&2
+    exit 1
+  fi
+}
+
+# Guarda de última línea del Caddyfile: ningún valor con «{», «}» ni saltos de línea (cierran o abren bloques de Caddy).
+#   caddy_valor_seguro <NOMBRE> <valor>
+caddy_valor_seguro() {
+  if [[ "$2" == *[\{\}]* || "$2" =~ [[:cntrl:]] ]]; then
+    echo "ERROR: $1 lleva «{», «}» o un salto de línea y rompería el Caddyfile (valor: $(_citar "$2"))." >&2
+    return 1
+  fi
+}
+
 # CERTIFY_PUBLIC_URL en modo proxy: https://<host>[:puerto], sin ruta ni barra final. (http solo para
 # localhost / 127.0.0.1, pruebas locales: es lo mismo que admite scripts/lib/credencial.mjs.)
 validate_proxy_public_url() {
@@ -88,8 +148,12 @@ validate_proxy_public_url() {
     echo "ERROR: CERTIFY_PUBLIC_URL no debe terminar en «/» (valor: ${u})." >&2
     exit 1
   fi
+  if [[ "${u}" =~ ^https?://[^/]*[A-Z] ]]; then
+    echo "ERROR: CERTIFY_PUBLIC_URL debe estar en minúsculas (valor: $(_citar "${u}")): el DID y el contexto usan el nombre en minúsculas y la URL pública tendría otra identidad." >&2
+    exit 1
+  fi
   if ! [[ "${u}" =~ ${https_re} || "${u}" =~ ${local_re} ]]; then
-    echo "ERROR: CERTIFY_PUBLIC_URL debe ser https://<dominio público> sin ruta ni espacios (valor: ${u})." >&2
+    echo "ERROR: CERTIFY_PUBLIC_URL debe ser https://<dominio público> sin ruta ni espacios (valor: $(_citar "${u}"))." >&2
     exit 1
   fi
 }
@@ -347,6 +411,7 @@ validate_env() {
     printf '  - %s\n' "${missing[@]}" >&2
     exit 1
   fi
+  [[ "${TLS_MODE:-}" == "proxy" ]] || validate_acme_email
   # La clave es el nombre de los ficheros del contexto y del logo (y parte de su URL): se valida aquí, antes de
   # generar nada (el contexto, que se genera primero, ya la usa para nombrar sus ficheros).
   if ! [[ "${CREDENTIAL_CONFIG_KEY_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
