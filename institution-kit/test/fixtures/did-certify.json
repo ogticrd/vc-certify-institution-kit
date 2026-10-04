@@ -1,0 +1,22 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1"
+  ],
+  "id": "did:web:emisor.prueba.invalid",
+  "alsoKnownAs": [],
+  "service": [],
+  "verificationMethod": [
+    {
+      "id": "did:web:emisor.prueba.invalid#key-0",
+      "type": "Ed25519VerificationKey2020",
+      "controller": "did:web:emisor.prueba.invalid",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+    }
+  ],
+  "authentication": [
+    "did:web:emisor.prueba.invalid"
+  ],
+  "assertionMethod": [
+    "did:web:emisor.prueba.invalid"
+  ]
+}

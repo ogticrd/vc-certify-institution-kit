@@ -21,11 +21,11 @@ for (const modo of ["domain", "ip"]) {
     before(() => { e = prepararEntorno({ modo }); });
     after(() => e.limpiar());
 
-    // T2: de cinco a siete ficheros (se suman el contexto propio y la credencial de muestra).
-    test("la generación termina bien y produce los siete ficheros", () => {
+    // T2: de cinco a siete ficheros (se suman el contexto propio y la credencial de muestra); T3: el logo.
+    test("la generación termina bien y produce los ocho ficheros", () => {
       assert.equal(e.pasos.runtime.status, 0, e.pasos.runtime.stderr);
       assert.equal(e.pasos.generar.status, 0, e.pasos.generar.stderr);
-      for (const clave of ["runtime", "propiedadesDefault", "propiedadesInstitucion", "caddyfile", "sql", "muestra", "contexto"]) {
+      for (const clave of ["runtime", "propiedadesDefault", "propiedadesInstitucion", "caddyfile", "sql", "muestra", "contexto", "logo"]) {
         assert.ok(e.existe(clave), `falta ${clave}: ${e.rutas[clave]}`);
       }
     });
@@ -89,27 +89,32 @@ for (const modo of ["domain", "ip"]) {
       assert.equal(sujeto.nombre.display[0].locale, "es");
     });
 
-    test("DEFECTO R10: el logo es la URL externa configurada (y por defecto, el de un tercero)", () => {
+    // T3 (R10): antes la URL externa configurada (y por defecto, el logo de un tercero).
+    test("R10: el logo es el propio, servido por el kit en /logos/<clave>.png", () => {
       const v = valoresSql(e.leer("sql"));
       const display = JSON.parse(literal(v.display));
-      assert.equal(display[0].logo.url, "https://emisor.prueba.invalid/logo-de-prueba.png");
+      assert.equal(display[0].logo.url, `https://${host}/logos/PruebaLicencia.png`);
     });
 
     test("Caddyfile: sitio con el host, email ACME global y proxy a certify:8090", () => {
       const c = e.leer("caddyfile");
       assert.match(c, /^\{\n\temail infra@prueba\.invalid\n\}/);
       assert.match(c, new RegExp(`^${host.replaceAll(".", "\\.")} \\{$`, "m"));
-      assert.match(c, /reverse_proxy \/v1\/certify\/\* certify:8090/);
+      assert.match(c, /import certify_comun/);
       // Sin bloque `tls` explícito: Caddy usa ACME (Let's Encrypt) por defecto con el email global.
       assert.doesNotMatch(c, /^\s*tls\b/m);
       assert.doesNotMatch(c, /^\s*(http:\/\/|:80\b)/m);
     });
 
-    test("DEFECTO R5: did.json se reescribe a Certify tal cual; no hay /contextos, /logos ni bloqueo del actuator", () => {
+    // T3: antes did.json se reescribía a Certify tal cual y no había /contextos, /logos ni bloqueo del
+    // actuator. El detalle de las rutas nuevas está en caddy-did-logos.test.mjs.
+    test("el Caddyfile conserva la metadata del emisor y el proxy a Certify, y añade did.json/contextos/logos/actuator (T3)", () => {
       const c = e.leer("caddyfile");
-      assert.match(c, /route \/\.well-known\/did\.json \{\n\t\trewrite \* \/v1\/certify\/\.well-known\/did\.json/);
-      assert.match(c, /route \/\.well-known\/openid-credential-issuer/);
-      assert.doesNotMatch(c, /contextos|logos|file_server|no-cache|respond .*404|actuator/);
+      assert.match(c, /route \/\.well-known\/openid-credential-issuer \{\n\t\trewrite \* \/v1\/certify\/\.well-known\/openid-credential-issuer\n\t\treverse_proxy certify:8090/);
+      assert.match(c, /handle \/v1\/certify\/\* \{\n\t\treverse_proxy certify:8090/);
+      assert.match(c, /\/contextos\/\*/);
+      assert.match(c, /\/logos\/\*/);
+      assert.match(c, /\/v1\/certify\/actuator\*/);
     });
 
     test("DEFECTO R4: las properties apuntan a cuenta.digital.gob.do (staging)", () => {
@@ -204,7 +209,8 @@ describe("línea base · casos límite del comportamiento actual", () => {
 
   test("el .env.example del kit, con el secreto sustituido, genera sin error", () => {
     const ejemplo = readFileSync(join(KIT_ORIGEN, ".env.example"), "utf8")
-      .replace("REEMPLAZAR_CON_SECRET_DE_OGTIC", "secreto-de-mentira");
+      .replace("REEMPLAZAR_CON_SECRET_DE_OGTIC", "secreto-de-mentira")
+      .replace(/^LOGO_PATH=$/m, "LOGO_PATH=__LOGO_PATH__");
     const e = prepararEntorno({ envTexto: ejemplo });
     try {
       assert.equal(e.pasos.runtime.status, 0, e.pasos.runtime.stderr);

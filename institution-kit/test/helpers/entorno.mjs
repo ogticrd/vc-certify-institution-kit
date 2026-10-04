@@ -30,6 +30,12 @@ export const KIT_ORIGEN = join(AQUI, "..", "..");
 // Fuera del temporal: lo que no debe copiarse (el .env real nunca se lee ni se copia).
 const EXCLUIDOS = new Set([".git", "generated", ".env", "test", "node_modules", "caddy_data"]);
 
+// PNG válido de 1×1 píxel (firma de 8 bytes + IHDR + IDAT + IEND).
+export const PNG_1X1 = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "base64",
+);
+
 export const ENV_BASE = {
   TLS_MODE: "domain",
   CERTIFY_PUBLIC_HOST: "emisor.prueba.invalid",
@@ -44,8 +50,7 @@ export const ENV_BASE = {
   CREDENTIAL_CONFIG_KEY_ID: "PruebaLicencia",
   CREDENTIAL_ATTRIBUTES: "nombre,apellido,numeroLicencia",
   CREDENTIAL_SCOPE: "openid offline_access profile email",
-  // Variable de logo de HOY; T3 la cambiará por LOGO_PATH.
-  CREDENTIAL_LOGO_URL: "https://emisor.prueba.invalid/logo-de-prueba.png",
+  // LOGO_PATH (obligatorio desde T3) lo pone prepararEntorno: apunta a un PNG de 1×1 en el temporal.
   POSTGRES_USER: "postgres",
   POSTGRES_PASSWORD: "clave-bd-de-mentira",
   POSTGRES_DB: "inji_certify",
@@ -79,7 +84,7 @@ function bash(cwd, orden, env) {
  * @param {object} o.extra                    variables del .env que se suman/sustituyen
  * @param {boolean} o.runtime                 reproducir el tramo de install.sh que escribe .env.runtime (por defecto sí)
  * @param {boolean} o.generar                 ejecutar generate-config.sh (por defecto sí)
- * @param {string|null} o.envTexto            si se da, se escribe tal cual como .env (en vez de ENV_BASE)
+ * @param {string|null} o.envTexto            si se da, se escribe como .env (en vez de ENV_BASE); `__LOGO_PATH__` se sustituye por el PNG de prueba
  */
 export function prepararEntorno({ modo = "domain", extra = {}, runtime = true, generar = true, envTexto = null } = {}) {
   const raiz = mkdtempSync(join(tmpdir(), "kit-prueba-"));
@@ -88,8 +93,10 @@ export function prepararEntorno({ modo = "domain", extra = {}, runtime = true, g
     recursive: true,
     filter: (src) => !EXCLUIDOS.has(basename(src)),
   });
-  if (envTexto !== null) writeFileSync(join(kit, ".env"), envTexto);
-  else escribirEnv(join(kit, ".env"), { modo, extra });
+  const logo = join(raiz, "logo-de-prueba.png");
+  writeFileSync(logo, PNG_1X1);
+  if (envTexto !== null) writeFileSync(join(kit, ".env"), envTexto.replaceAll("__LOGO_PATH__", logo));
+  else escribirEnv(join(kit, ".env"), { modo, extra: { LOGO_PATH: logo, ...extra } });
 
   // Entorno limpio: ni el de quien ejecuta las pruebas ni variables heredadas del kit.
   const env = {
@@ -110,11 +117,14 @@ export function prepararEntorno({ modo = "domain", extra = {}, runtime = true, g
     sql: join(gen, "credential_config.sql"),
     muestra: join(gen, "credencial-muestra.json"),
     contexto: join(gen, "contextos", `${extra.CREDENTIAL_CONFIG_KEY_ID ?? ENV_BASE.CREDENTIAL_CONFIG_KEY_ID}.json`),
+    logo: join(gen, "logos", `${extra.CREDENTIAL_CONFIG_KEY_ID ?? ENV_BASE.CREDENTIAL_CONFIG_KEY_ID}.png`),
+    carpetaDid: join(gen, "did"),
+    compose: join(kit, "docker-compose.yml"),
   };
   // Ejecuta una orden bash en el kit temporal con el mismo entorno limpio (más `adicional`).
   const ejecutar = (orden, adicional = {}) => bash(kit, orden, { ...env, ...adicional });
   return {
-    raiz, kit, generated: gen, rutas, pasos, ejecutar,
+    raiz, kit, generated: gen, rutas, pasos, ejecutar, logoOrigen: logo,
     salida: (pasos.generar ?? pasos.runtime ?? { stdout: "", stderr: "", status: null }),
     existe: (clave) => existsSync(rutas[clave]),
     leer: (clave) => readFileSync(rutas[clave], "utf8"),
