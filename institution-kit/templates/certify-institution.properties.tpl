@@ -6,7 +6,7 @@ mosip.certify.plugin-mode=DataProvider
 
 mosip.certify.data-provider-plugin.restapi.base-url=${RESTAPI_BASE_URL}
 mosip.certify.data-provider-plugin.restapi.auth-token=
-mosip.certify.data-provider-plugin.id-field-prefix-uri=https://mosip.io/credential/
+mosip.certify.data-provider-plugin.id-field-prefix-uri=${CERTIFY_PUBLIC_URL}/credential/
 mosip.certify.data-provider-plugin.issuer.vc-sign-algo=Ed25519Signature2020
 mosip.certify.data-provider-plugin.restapi.scope-endpoint-mapping=${RESTAPI_SCOPE_ENDPOINT_MAPPING}
 

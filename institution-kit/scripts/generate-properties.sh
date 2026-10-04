@@ -27,7 +27,7 @@ render_template \
   "${OUT_DIR}/certify-default.properties" \
   "${VARS}"
 
-INST_VARS='$RESTAPI_BASE_URL $RESTAPI_SCOPE_ENDPOINT_MAPPING $RESTAPI_TOKEN_URL $OAUTH_CLIENT_ID $POSTGRES_DB'
+INST_VARS='$CERTIFY_PUBLIC_URL $RESTAPI_BASE_URL $RESTAPI_SCOPE_ENDPOINT_MAPPING $RESTAPI_TOKEN_URL $OAUTH_CLIENT_ID $POSTGRES_DB'
 render_template \
   "${KIT_DIR}/templates/certify-institution.properties.tpl" \
   "${OUT_DIR}/certify-institution.properties" \
