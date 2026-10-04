@@ -14,5 +14,5 @@ derive_public_url
 derive_did_url
 export_env_for_templates
 
-mkdir -p "${GENERATED_DIR}"
+ensure_generated_dir
 run_node generate-context.mjs generated

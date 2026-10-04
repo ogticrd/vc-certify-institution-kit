@@ -226,9 +226,11 @@ describe("D7 · secretos", () => {
       assert.notEqual(pg, ks);
       assert.notEqual(pg, "postgres");
       assert.notEqual(ks, "local");
+      // T8 (K1): las properties llevan marcadores y el contenedor recibe las contraseñas de .env.runtime.
       const p = e.leer("propiedadesDefault");
-      assert.match(p, new RegExp(`^spring\\.datasource\\.password=${pg}$`, "m"));
-      assert.match(p, new RegExp(`^mosip\\.kernel\\.keymanager\\.hsm\\.keystore-pass=${ks}$`, "m"));
+      assert.match(p, /^spring\.datasource\.password=\$\{KIT_DB_PASSWORD\}$/m);
+      assert.match(p, /^mosip\.kernel\.keymanager\.hsm\.keystore-pass=\$\{KIT_KEYSTORE_PASSWORD\}$/m);
+      assert.ok(!p.includes(pg) && !p.includes(ks), "ni la contraseña de Postgres ni la del keystore van en las properties");
       assert.doesNotMatch(sinComentarios(p), /keystore-pass=local$/m);
     } finally { e.limpiar(); }
   });
@@ -265,8 +267,8 @@ describe("D7 · secretos", () => {
       assert.equal(valor(r, "POSTGRES_PASSWORD"), "bd-explicita-123");
       assert.equal(valor(r, "KEYSTORE_PASSWORD"), "keystore-explicito-456");
       const p = e.leer("propiedadesDefault");
-      assert.match(p, /^spring\.datasource\.password=bd-explicita-123$/m);
-      assert.match(p, /^mosip\.kernel\.keymanager\.hsm\.keystore-pass=keystore-explicito-456$/m);
+      assert.ok(!p.includes("bd-explicita-123") && !p.includes("keystore-explicito-456"), "K1: no van en las properties");
+      assert.match(p, /^spring\.datasource\.password=\$\{KIT_DB_PASSWORD\}$/m);
       assert.equal(e.modo("runtime"), 0o600);
     } finally { e.limpiar(); }
   });
@@ -299,11 +301,11 @@ describe("D7 · secretos", () => {
     } finally { e.limpiar(); }
   });
 
-  test(".env.runtime ya no copia el OAUTH_CLIENT_SECRET ni el .env entero, y no deja temporales", () => {
+  test(".env.runtime no copia el .env entero (solo contraseñas y secreto OAuth) y no deja temporales", () => {
     const e = generar(SIN_CONTRASENAS);
     try {
       const r = e.leer("runtime");
-      assert.doesNotMatch(r, /OAUTH_CLIENT_SECRET|secreto-de-mentira|CREDENTIAL_|INSTITUTION_/);
+      assert.doesNotMatch(r, /CREDENTIAL_|INSTITUTION_|RESTAPI_/);
       const restos = readdirSync(e.generated).filter((f) => f.startsWith(".env.runtime."));
       assert.deepEqual(restos, []);
     } finally { e.limpiar(); }

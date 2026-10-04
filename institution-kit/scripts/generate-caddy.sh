@@ -20,6 +20,7 @@ CADDY_FRAGMENTO_COMUN="$(cat "${KIT_DIR}/templates/Caddyfile.comun.inc")"
 export CADDY_FRAGMENTO_COMUN
 
 OUT_FILE="${GENERATED_DIR}/caddy/Caddyfile"
+ensure_generated_dir
 mkdir -p "$(dirname "${OUT_FILE}")"
 
 # El correo de ACME solo hace falta cuando Caddy pide certificados (domain, ip); en proxy no hay ACME.

@@ -38,11 +38,13 @@ for (const modo of ["domain", "ip"]) {
 
     // T4 (D7): antes «DEFECTO: .env.runtime guarda en claro el secreto OAuth». Ahora solo lleva lo que
     // la ejecución necesita (las contraseñas, con modo 600); el OAUTH_CLIENT_SECRET ya no se copia.
-    test(".env.runtime lleva las contraseñas de ejecución y no copia el OAUTH_CLIENT_SECRET (T4)", () => {
+    // T8 (K1): el secreto OAuth pasa a .env.runtime (600) porque las properties (644) ya no lo llevan.
+    test(".env.runtime lleva las contraseñas y el secreto OAuth de ejecución, y no copia el resto del .env (T4, K1)", () => {
       const r = e.leer("runtime");
       assert.match(r, /^POSTGRES_PASSWORD=clave-bd-de-mentira$/m);
       assert.match(r, /^KEYSTORE_PASSWORD=clave-keystore-de-mentira$/m);
-      assert.doesNotMatch(r, /OAUTH_CLIENT_SECRET|secreto-de-mentira/);
+      assert.match(r, /^OAUTH_CLIENT_SECRET=secreto-de-mentira$/m);
+      assert.doesNotMatch(r, /CREDENTIAL_|INSTITUTION_|RESTAPI_/);
     });
 
     // T2 (R7): antes «un INSERT sin ON CONFLICT y con config_id aleatorio (gen_random_uuid)».
@@ -151,10 +153,11 @@ for (const modo of ["domain", "ip"]) {
       const p = e.leer("propiedadesDefault");
       assert.match(p, /^management\.endpoints\.web\.exposure\.include=health$/m);
       assert.match(p, /^management\.endpoint\.env\.show-values=NEVER$/m);
-      assert.match(p, /^mosip\.kernel\.keymanager\.hsm\.keystore-pass=clave-keystore-de-mentira$/m);
-      assert.match(p, /^spring\.datasource\.password=clave-bd-de-mentira$/m);
+      // T8 (K1): las properties llevan marcadores, no contraseñas (las resuelve Spring desde el entorno).
+      assert.match(p, /^mosip\.kernel\.keymanager\.hsm\.keystore-pass=\$\{KIT_KEYSTORE_PASSWORD\}$/m);
+      assert.match(p, /^spring\.datasource\.password=\$\{KIT_DB_PASSWORD\}$/m);
       assert.match(p, /^logging\.level\.io\.mosip\.certify\.filter=WARN$/m);
-      assert.match(e.leer("propiedadesInstitucion"), /^mosip\.certify\.data-provider-plugin\.restapi\.auth\.client-secret=secreto-de-mentira$/m);
+      assert.match(e.leer("propiedadesInstitucion"), /^mosip\.certify\.data-provider-plugin\.restapi\.auth\.client-secret=\$\{KIT_OAUTH_CLIENT_SECRET\}$/m);
     });
   });
 }

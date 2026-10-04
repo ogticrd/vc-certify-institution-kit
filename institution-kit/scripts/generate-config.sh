@@ -39,5 +39,6 @@ echo "  -> ${GENERATED_DIR}/compose-args (orden de docker compose para TLS_MODE=
 "${SCRIPT_DIR}/generate-credential-sql.sh"
 # La carpeta del DID corregido tiene que existir aunque esté vacía: docker compose la monta en Caddy
 # (si no existiera, Docker la crearía como root). generate-did.sh la rellena cuando Certify está UP.
+ensure_generated_dir
 mkdir -p "${SCRIPT_PARENT}/generated/did"
 echo "=== Configuración generada en generated/ ==="

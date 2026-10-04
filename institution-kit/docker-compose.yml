@@ -32,6 +32,11 @@ services:
       - DATABASE_PORT=5432
       - DATABASE_USERNAME=${POSTGRES_USER:-postgres}
       - DATABASE_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      # K1: los secretos NO van en los .properties (modo 644): las properties llevan ${KIT_*} y Spring los
+      # resuelve de estas variables, que compose toma de generated/.env.runtime (modo 600, --env-file).
+      - KIT_DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - KIT_KEYSTORE_PASSWORD=${KEYSTORE_PASSWORD:-local}
+      - KIT_OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET:-}
       # El XML manda sobre la propiedad logging.level: ver el comentario de templates/logback-kit.xml (R12).
       - LOGGING_CONFIG=/home/mosip/config/logback-kit.xml
     command:

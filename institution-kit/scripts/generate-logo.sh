@@ -18,6 +18,7 @@ validate_logo_path   # define LOGO_PATH_RESOLVED; sale con un error claro si fal
   || { echo "ERROR: CREDENTIAL_CONFIG_KEY_ID inválido (solo letras, dígitos, «_» y «-»): es el nombre del fichero del logo." >&2; exit 1; }
 
 DESTINO="${GENERATED_DIR}/logos"
+ensure_generated_dir
 mkdir -p "${DESTINO}"
 # Un logo viejo de otra clave no se sirve: solo hay un PNG por clave y se reescribe cada vez.
 cp "${LOGO_PATH_RESOLVED}" "${DESTINO}/${CREDENTIAL_CONFIG_KEY_ID}.png"

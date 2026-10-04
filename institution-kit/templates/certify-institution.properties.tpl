@@ -15,7 +15,8 @@ mosip.certify.data-provider-plugin.restapi.scope-endpoint-mapping=${RESTAPI_SCOP
 # (inji-vc/stack/config/certify-soyyord.properties).
 mosip.certify.data-provider-plugin.restapi.auth.token-url=${RESTAPI_TOKEN_URL}
 mosip.certify.data-provider-plugin.restapi.auth.client-id=${OAUTH_CLIENT_ID}
-mosip.certify.data-provider-plugin.restapi.auth.client-secret=${OAUTH_CLIENT_SECRET}
+# Sin secretos en este fichero (K1): ${KIT_OAUTH_CLIENT_SECRET} lo resuelve Spring desde el entorno del contenedor.
+mosip.certify.data-provider-plugin.restapi.auth.client-secret=${KIT_OAUTH_CLIENT_SECRET}
 
 mosip.certify.database.name=${POSTGRES_DB}
 mosip.certify.mock.vciplugin.verification-method=${mosip.certify.authn.jwk-set-uri}

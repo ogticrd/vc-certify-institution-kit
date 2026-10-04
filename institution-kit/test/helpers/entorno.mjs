@@ -17,7 +17,7 @@
 // conserva por compatibilidad con las pruebas anteriores y ya no hace nada.
 import { spawnSync } from "node:child_process";
 import {
-  cpSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, statSync,
+  cpSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, statSync, chmodSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, basename } from "node:path";
@@ -64,6 +64,7 @@ export function escribirEnv(ruta, { modo = "domain", extra = {} } = {}) {
     .filter(([, v]) => v !== undefined)
     .map(([k, v]) => `${k}="${String(v).replace(/(["\\$`])/g, "\\$1")}"`);
   writeFileSync(ruta, lineas.join("\n") + "\n");
+  chmodSync(ruta, 0o600); // como lo recomienda el kit (K1): sin el aviso de «.env legible por otros» en cada prueba
 }
 
 function bash(cwd, orden, env) {
@@ -90,7 +91,7 @@ export function prepararEntorno({ modo = "domain", extra = {}, runtime = true, g
   });
   const logo = join(raiz, "logo-de-prueba.png");
   writeFileSync(logo, PNG_1X1);
-  if (envTexto !== null) writeFileSync(join(kit, ".env"), envTexto.replaceAll("__LOGO_PATH__", logo));
+  if (envTexto !== null) { writeFileSync(join(kit, ".env"), envTexto.replaceAll("__LOGO_PATH__", logo)); chmodSync(join(kit, ".env"), 0o600); }
   else escribirEnv(join(kit, ".env"), { modo, extra: { LOGO_PATH: logo, ...extra } });
 
   // Entorno limpio: ni el de quien ejecuta las pruebas ni variables heredadas del kit.

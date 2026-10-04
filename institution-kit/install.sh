@@ -37,8 +37,10 @@ docker compose version >/dev/null 2>&1 || { echo "ERROR: Docker Compose v2 reque
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   if [[ -f "${KIT_DIR}/.env.example" ]]; then
-    cp "${KIT_DIR}/.env.example" "${ENV_FILE}"
-    echo "Se creó ${ENV_FILE} desde .env.example."
+    # Con modo 600 desde el primer byte: ahí se escribe el secreto de OAuth y, a veces, las contraseñas.
+    ( umask 077 && cp "${KIT_DIR}/.env.example" "${ENV_FILE}" )
+    chmod 600 "${ENV_FILE}"
+    echo "Se creó ${ENV_FILE} desde .env.example (modo 600: contendrá secretos; no lo abra a otros usuarios)."
     echo "Complete los valores y vuelva a ejecutar ./install.sh"
     exit 1
   fi

@@ -119,8 +119,9 @@ mosip.kernel.certificate.sign.algorithm=SHA256withRSA
 mosip.kernel.keymanager.hsm.config-path=CERTIFY_PKCS12/local.p12
 mosip.kernel.keymanager.hsm.keystore-type=PKCS12
 # Contraseña del keystore PKCS12: la genera el kit si se deja «local» (KEYSTORE_PASSWORD en el .env;
-# solo instalaciones nuevas: el keystore se crea con ella en el primer arranque).
-mosip.kernel.keymanager.hsm.keystore-pass=${KEYSTORE_PASSWORD}
+# solo instalaciones nuevas: el keystore se crea con ella en el primer arranque). Sin secretos en este
+# fichero (K1): ${KIT_KEYSTORE_PASSWORD} lo resuelve Spring desde el entorno del contenedor.
+mosip.kernel.keymanager.hsm.keystore-pass=${KIT_KEYSTORE_PASSWORD}
 
 mosip.kernel.keymanager.certificate.default.common-name=www.example.com
 mosip.kernel.keymanager.certificate.default.organizational-unit=EXAMPLE-CENTER
@@ -152,7 +153,8 @@ mosip.certify.database.hostname=database
 mosip.certify.database.port=5432
 spring.datasource.url=jdbc:postgresql://database:5432/${POSTGRES_DB}?currentSchema=certify
 spring.datasource.username=${POSTGRES_USER}
-spring.datasource.password=${POSTGRES_PASSWORD}
+# Sin secretos en este fichero (K1): ${KIT_DB_PASSWORD} lo resuelve Spring desde el entorno del contenedor.
+spring.datasource.password=${KIT_DB_PASSWORD}
 spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect
 spring.jpa.show-sql=false
 spring.jpa.hibernate.ddl-auto=none

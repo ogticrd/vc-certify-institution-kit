@@ -14,10 +14,38 @@ load_env() {
     echo "ERROR: No existe ${ENV_FILE}. Copie .env.example a .env y complete los valores." >&2
     exit 1
   fi
+  aviso_permisos_env
   # shellcheck disable=SC1090
   set -a
   source "${ENV_FILE}"
   set +a
+}
+
+# Modo (octal, p. ej. 644) de un fichero, en Linux (GNU stat) y en macOS (BSD stat).
+file_mode() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null || true
+}
+
+# K1/K12: el .env lleva OAUTH_CLIENT_SECRET y, a veces, las contraseñas. Si lo puede leer otro usuario del
+# servidor, avisa (una sola vez por ejecución: los scripts hijos heredan la marca) y dice cómo corregirlo.
+# Solo avisa: no cambia el modo de un fichero que la institución ya tenía.
+aviso_permisos_env() {
+  [[ -z "${KIT_AVISO_ENV_MOSTRADO:-}" ]] || return 0
+  local m
+  m="$(file_mode "${ENV_FILE}")"
+  [[ "${m}" =~ ^[0-7]{3,4}$ ]] || return 0
+  if (( (8#${m}) & 8#077 )); then
+    echo "AVISO: ${ENV_FILE} es legible por otros usuarios (modo ${m}) y contiene el secreto de OAuth. Ejecute: chmod 600 ${ENV_FILE}" >&2
+    KIT_AVISO_ENV_MOSTRADO=1
+    export KIT_AVISO_ENV_MOSTRADO
+  fi
+}
+
+# generated/ guarda .env.runtime (contraseñas) y la configuración: solo para quien instala (700). Docker
+# monta SUBcarpetas y ficheros concretos (el daemon los lee como root), no generated/ entera.
+ensure_generated_dir() {
+  mkdir -p "${GENERATED_DIR}"
+  chmod 700 "${GENERATED_DIR}"
 }
 
 derive_public_url() {
@@ -295,12 +323,15 @@ validate_logo_path() {
   export LOGO_PATH_RESOLVED
 }
 
-# generated/.env.runtime (modo 600): lo que necesita la ejecución —las contraseñas incluidas— y nada
+# generated/.env.runtime (modo 600): lo que necesita la ejecución —contraseñas y secreto OAuth— y nada
 # más. Lo lee `docker compose` (--env-file, ver generated/compose-args) y las propias funciones del
-# kit; NO se carga con `source`. Ya no copia el .env entero ni OAUTH_CLIENT_SECRET (nada lo leía).
+# kit; NO se carga con `source`. No copia el .env entero. K1: es el ÚNICO fichero que lleva los secretos;
+# las properties de Certify (generated/config/*.properties, 644 porque el contenedor las lee como uid 1001)
+# solo llevan marcadores ${KIT_DB_PASSWORD}, ${KIT_KEYSTORE_PASSWORD} y ${KIT_OAUTH_CLIENT_SECRET} que Spring
+# resuelve desde el entorno del contenedor (docker-compose.yml las toma de este fichero).
 # Se escribe de forma atómica con permisos restrictivos desde el primer byte.
 write_runtime_env() {
-  mkdir -p "${GENERATED_DIR}"
+  ensure_generated_dir
   local tmp
   tmp="$(umask 077 && mktemp "${GENERATED_DIR}/.env.runtime.XXXXXX")"
   cat > "${tmp}" <<EOF
@@ -311,6 +342,7 @@ POSTGRES_USER=${POSTGRES_USER:-postgres}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
 POSTGRES_DB=${POSTGRES_DB:-inji_certify}
 KEYSTORE_PASSWORD=${KEYSTORE_PASSWORD:-}
+OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET:-}
 CADDY_HTTP_PORT=${CADDY_HTTP_PORT:-8080}
 EOF
   chmod 600 "${tmp}"
@@ -325,7 +357,7 @@ EOF
 # publica ningún puerto: ejecutar `docker compose` a secas deja Caddy sin puertos, no con los
 # equivocados. Las rutas son relativas al directorio del kit.
 write_compose_args() {
-  mkdir -p "${GENERATED_DIR}"
+  ensure_generated_dir
   local overlay
   case "${TLS_MODE}" in
     proxy) overlay="docker-compose.proxy.yml" ;;
