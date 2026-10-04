@@ -4,7 +4,7 @@
 //
 //   node scripts/lib/verificar-instalacion.mjs --url <https://…/.well-known/openid-credential-issuer>
 //        --as <servidor de autorización> [--muestra <credencial-muestra.json>]
-//        [--privadas auto|si|no]
+//        [--privadas auto|si|no] [--clave <CREDENTIAL_CONFIG_KEY_ID> --atributos a,b,c] [--salud ok|falla]
 //
 // QUÉ HACE. Es un envoltorio: NO reimplementa el diagnóstico de OGTIC. Ejecuta el
 // `diagnostico/cli.mjs` vendorizado, sin modificarlo, con `--json`, y presenta su informe en
@@ -18,6 +18,12 @@
 //   - Que el `@context` que publica la metadata esté completo (W3C + propio + suite). El motor
 //     añade la suite por su cuenta al medir la cobertura (comprobación 8), así que no avisa si la
 //     metadata no la lista.
+//
+//   - Que los atributos del `.env` sean los que Certify PUBLICA en su metadata (K10): la cobertura anterior se
+//     calculaba sobre la muestra que el propio kit genera desde ese mismo `.env`, así que no detectaba una base de
+//     datos desfasada (apply-credential.sh sin aplicar, instalación existente). Se compara
+//     `credential_configurations_supported[<clave>].credential_definition.credentialSubject` con CREDENTIAL_ATTRIBUTES
+//     (en Certify 0.14 la clave del mapa es credentialConfigKeyId): falta alguno -> FALLA; sobra alguno -> AVISO.
 //
 // Y una política del kit: el motor da AVISO (no FALLA) a un logo que no es PNG y a un contexto sin
 // `Cache-Control: no-cache`; R8 los exige, así que aquí cuentan como FALLA.
@@ -58,8 +64,11 @@ const url = opcion("--url");
 const as = opcion("--as");
 const muestra = opcion("--muestra");
 const modoPrivadas = opcion("--privadas") ?? "auto";
-if (!url || !as || !["auto", "si", "no"].includes(modoPrivadas) || args.length) {
-  console.error("uso: node verificar-instalacion.mjs --url <metadata_url> --as <servidor> [--muestra <fichero>] [--privadas auto|si|no]");
+const claveEsperada = opcion("--clave");
+const atributosEsperados = (opcion("--atributos") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+const salud = opcion("--salud") ?? "ok";
+if (!url || !as || !["auto", "si", "no"].includes(modoPrivadas) || !["ok", "falla"].includes(salud) || args.length) {
+  console.error("uso: node verificar-instalacion.mjs --url <metadata_url> --as <servidor> [--muestra <fichero>] [--privadas auto|si|no] [--clave <clave> --atributos a,b,c] [--salud ok|falla]");
   process.exit(2);
 }
 
@@ -101,6 +110,8 @@ function ejecutarCli(argumentos) {
 
 const T_CTX = "El @context de la metadata está completo (W3C, propio y suite)";
 const T_COB = "Cobertura de firma sobre la credencial de muestra";
+const T_ATTR = "Los atributos del .env coinciden con los que publica Certify";
+const T_SALUD = "Certify responde UP por la red interna";
 const lineas = [];
 const filas = []; // {rotulo, estado, titulo, resumen, accion, detalles}
 const fila = (rotulo, estado, titulo, resumen, accion = null, detalles = []) => filas.push({ rotulo, estado, titulo, resumen, accion, detalles: detalles.filter(Boolean) });
@@ -140,9 +151,9 @@ const sinMetadata = !informe || ![OK, AVISO].includes(estadoDe("metadata"));
 // --- 2. el @context de la metadata y el credential_endpoint ----------------------------
 const red = crearRed({ espera: Number(process.env.ESPERA ?? 8000), permitirPrivadas: privadas });
 let credentialEndpoint = null;
+let wk = null; // la metadata publicada (la usan la comprobación del @context y la de los atributos)
 {
   const titulo = T_CTX;
-  let wk = null;
   if (!sinMetadata) {
     try {
       const r = await red.traer(url);
@@ -173,6 +184,39 @@ let credentialEndpoint = null;
     else fila("+", OK, titulo, `${evaluadas} ${evaluadas === 1 ? "credencial publica" : "credenciales publican"} el contexto de W3C, el propio y el de la suite.`);
   }
 }
+
+// --- 2b. los atributos del .env frente a lo que Certify PUBLICA (K10) --------------------------
+if (claveEsperada || atributosEsperados.length) {
+  const titulo = T_ATTR;
+  if (!wk || typeof wk !== "object" || !wk.credential_configurations_supported) {
+    fila("+", PENDIENTE, titulo, "Depende de la comprobación 1: sin metadata no se puede comparar con el .env.");
+  } else {
+    const configuraciones = wk.credential_configurations_supported;
+    const config = claveEsperada ? configuraciones[claveEsperada] : null;
+    if (claveEsperada && !config) {
+      fila("+", FALLA, titulo, `La metadata no publica la credencial «${claveEsperada}» (CREDENTIAL_CONFIG_KEY_ID del .env).`,
+        "La base de datos de Certify no tiene esa credencial: ejecute scripts/apply-credential.sh (y reinicie Certify, que guarda la configuración en caché).",
+        [`Publica: ${Object.keys(configuraciones).join(", ") || "ninguna"}`]);
+    } else {
+      const publicados = Object.keys((config?.credential_definition ?? {}).credentialSubject ?? {}).filter((k) => k !== "id" && k !== "type");
+      const faltan = atributosEsperados.filter((a) => !publicados.includes(a));
+      const sobran = publicados.filter((a) => !atributosEsperados.includes(a));
+      if (faltan.length) {
+        fila("+", FALLA, titulo, `Certify publica ${atributosEsperados.length - faltan.length} de los ${atributosEsperados.length} atributos del .env: faltan ${faltan.join(", ")}.`,
+          "La base de datos no coincide con el .env: ejecute scripts/apply-credential.sh y reinicie Certify (o use una CREDENTIAL_CONFIG_KEY_ID nueva si cambió el contexto).",
+          [`Publica: ${publicados.join(", ") || "ninguno"}`, sobran.length ? `Publica de más: ${sobran.join(", ")}` : null]);
+      } else if (sobran.length) {
+        fila("+", AVISO, titulo, `Certify publica atributos que no están en el .env: ${sobran.join(", ")}.`,
+          "La base tiene una credencial más amplia que el .env: ejecute scripts/apply-credential.sh si el .env es el correcto.");
+      } else {
+        fila("+", OK, titulo, `${atributosEsperados.length} de ${atributosEsperados.length} atributos publicados (${atributosEsperados.join(", ")}).`);
+      }
+    }
+  }
+}
+
+// --- 2c. la salud de Certify (la mide verify-install.sh por la red interna y la pasa aquí) ------------
+if (salud === "falla") fila("+", FALLA, T_SALUD, "Certify no respondió UP por la red interna.", "Revise: docker compose logs certify");
 
 // --- 3. cobertura de firma de la muestra ------------------------------------------------
 {
@@ -261,7 +305,7 @@ for (const f of [...diagnostico, ...extras]) {
 }
 console.log("");
 // Orden de las filas extra en el resumen: primero la cobertura, luego el @context de la metadata.
-const extraOrden = [[T_COB, "+cobertura"], [T_CTX, "+@context de la metadata"]]
+const extraOrden = [[T_COB, "+cobertura"], [T_CTX, "+@context de la metadata"], [T_ATTR, "+atributos publicados"], [T_SALUD, "+salud"]]
   .map(([t, nombre]) => [extras.find((f) => f.titulo === t), nombre]).filter(([f]) => f)
   .map(([f, nombre]) => `${nombre} ${ETIQUETA[f.estado]}`);
 console.log(`Resumen: ${okDiagnostico}/${total} (${extraOrden.join(", ")}) · FALLA ${cuenta(FALLA)} · AVISO ${cuenta(AVISO)} · PENDIENTE ${cuenta(PENDIENTE)}`);

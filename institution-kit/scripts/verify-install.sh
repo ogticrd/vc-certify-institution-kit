@@ -21,6 +21,8 @@
 #   VERIFY_PRIVADAS=auto|1|0     direcciones privadas en el diagnóstico (auto: solo si la URL pública resuelve
 #                                a una dirección privada o de bucle: el propio servidor, un proxy interno).
 #   VERIFY_HEALTH_INTENTOS=60 y VERIFY_HEALTH_PAUSA=5   espera a Certify (segundos entre intentos).
+#   NODE_EXTRA_CA_CERTS=<fichero .pem>   CA interna de la institución (proxy con CA propia): con `node` local lo
+#                                hereda el proceso; con `docker run` se monta de solo lectura y se reenvía.
 #   ESPERA=8000                  tiempo de espera de cada petición del diagnóstico, en ms.
 set -euo pipefail
 
@@ -86,12 +88,22 @@ if [[ "${usar_docker}" -eq 1 ]]; then
   muestra_en_nodo="/kit/generated/credencial-muestra.json"
   [[ -f "${MUESTRA}" ]] && cmd+=(-v "${MUESTRA}:${muestra_en_nodo}:ro")
   [[ -n "${ESPERA:-}" ]] && cmd+=(-e ESPERA)
+  # K10: una CA interna de la institución (proxy con CA propia) hace falla la comprobación 1 en una instalación
+  # sana si el contenedor no la conoce: se monta el fichero de solo lectura y se reenvía la variable.
+  if [[ -n "${NODE_EXTRA_CA_CERTS:-}" ]]; then
+    [[ -r "${NODE_EXTRA_CA_CERTS}" ]] || { echo "ERROR: NODE_EXTRA_CA_CERTS apunta a un fichero que no existe o no se puede leer: ${NODE_EXTRA_CA_CERTS}" >&2; exit 1; }
+    cmd+=(-v "${NODE_EXTRA_CA_CERTS}:/kit/ca-extra.pem:ro" -e NODE_EXTRA_CA_CERTS=/kit/ca-extra.pem)
+  fi
   cmd+=(-w /kit "${NODE_IMAGE}" node /kit/scripts/lib/verificar-instalacion.mjs)
 else
   cmd=(node "${KIT_DIR}/scripts/lib/verificar-instalacion.mjs")
   muestra_en_nodo="${MUESTRA}"
 fi
-cmd+=(--url "${METADATA_URL}" --as "${AUTH_ISSUER_URL}" --muestra "${muestra_en_nodo}" --privadas "${privadas}")
+# K10: se le pasan la clave y los atributos DEL .env para compararlos con lo que Certify publica (no con la muestra,
+# que sale del mismo .env). Con node local, NODE_EXTRA_CA_CERTS lo hereda el proceso.
+cmd+=(--url "${METADATA_URL}" --as "${AUTH_ISSUER_URL}" --muestra "${muestra_en_nodo}" --privadas "${privadas}"
+  --clave "${CREDENTIAL_CONFIG_KEY_ID}" --atributos "${CREDENTIAL_ATTRIBUTES//[[:space:]]/}")
+[[ "${FALLO_SALUD}" -eq 1 ]] && cmd+=(--salud falla)
 
 if [[ -n "${KIT_DRY_RUN:-}" ]]; then
   _ejecutar_o_mostrar "${cmd[@]}"

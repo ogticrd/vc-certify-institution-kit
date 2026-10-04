@@ -129,10 +129,10 @@ describe("verify-install.sh contra un emisor sano (todo lo que generó el kit)",
     const r = await verificar();
     assert.equal(r.status, 0, r.stdout + r.stderr);
     for (let n = 1; n <= 11; n++) assert.equal(estadoDe(r, n), "OK", `comprobación ${n}: ${lineaDe(r, n)}`);
-    assert.equal(lineasDe(r).filter((l) => /^\s*\+\.\s+OK\b/.test(l)).length, 2, r.stdout);
+    assert.equal(lineasDe(r).filter((l) => /^\s*\+\.\s+OK\b/.test(l)).length, 3, r.stdout);
     assert.match(r.stdout, /Cobertura de firma sobre la credencial de muestra: 3 de 3 atributos firmados \(cobertura 100 %\)/);
     assert.match(r.stdout, /El @context de la metadata está completo/);
-    assert.match(r.stdout, /^Resumen: 11\/11 \(\+cobertura OK, \+@context de la metadata OK\) · FALLA 0 · AVISO 0 · PENDIENTE 0$/m);
+    assert.match(r.stdout, /^Resumen: 11\/11 \(\+cobertura OK, \+@context de la metadata OK, \+atributos publicados OK\) · FALLA 0 · AVISO 0 · PENDIENTE 0$/m);
     assert.match(r.stdout, /Resultado: la instalación pasa la verificación\./);
     assert.match(r.stdout, /OK {8}Certify responde UP\./);
     assert.match(r.stdout, new RegExp(`credential_endpoint: ${emisor.base}/credential`));
@@ -161,7 +161,7 @@ describe("verify-install.sh contra un emisor sano (todo lo que generó el kit)",
   test("el texto está en español: una línea por comprobación, estados OK/FALLA/AVISO/PENDIENTE, resumen y resultado", async () => {
     const r = await verificar();
     const filas = lineasDe(r).filter((l) => /^\s*(\d+|\+)\.\s+(OK|FALLA|AVISO|PENDIENTE)\s/.test(l));
-    assert.equal(filas.length, 13, "11 del diagnóstico + 2 del kit");
+    assert.equal(filas.length, 14, "11 del diagnóstico + 3 del kit (cobertura, @context, atributos publicados)");
     assert.match(r.stdout, /^Verificación de la instalación: https:\/\/localhost:\d+\/\.well-known\/openid-credential-issuer$/m);
     assert.match(r.stdout, /Servidor de autorización esperado:/);
     assert.match(r.stdout, /La metadata del emisor responde/);
@@ -292,6 +292,10 @@ describe("verify-install.sh: cada rotura da FALLA y código 1", () => {
     assert.match(r.stderr, /FALLA {5}Certify no respondió UP/);
     assert.match(r.stderr, /Resultado global: la verificación FALLÓ \(Certify no respondió UP\)/);
     assert.match(r.stdout, /Resumen: 11\/11/, "el diagnóstico corrió");
+    // K10: la salida estándar ya no dice «pasa la verificación» cuando el código es 1 (log de install.sh contradictorio).
+    assert.doesNotMatch(r.stdout, /la instalación pasa la verificación/);
+    assert.match(r.stdout, /FALLA\s+Certify responde UP por la red interna/);
+    assert.match(r.stdout, /Resultado: la verificación FALLÓ/);
   });
 
   test("health con una respuesta que no es JSON -> FALLA, sin romper el script", async () => {
@@ -379,8 +383,85 @@ describe("cómo se corre sin Node en el servidor (KIT_NODE=docker)", () => {
     const llamadas = readFileSync(registroDocker, "utf8").trim().split("\n");
     assert.ok(llamadas.some((l) => l.startsWith("docker run --rm --network host")), `usó docker run: ${llamadas.join(" | ")}`);
     // El `docker` falso no ejecuta el contenedor (y sale 0): lo que se comprueba es que, sin node, se pide el contenedor.
-    assert.ok(llamadas.some((l) => /node:22-alpine node \/kit\/scripts\/lib\/verificar-instalacion\.mjs --url https:\/\/localhost:\d+\/\.well-known\/openid-credential-issuer --as https:\/\/localhost:\d+ --muestra \/kit\/generated\/credencial-muestra\.json --privadas auto$/.test(l)), llamadas.join(" | "));
+    assert.ok(llamadas.some((l) => /node:22-alpine node \/kit\/scripts\/lib\/verificar-instalacion\.mjs --url https:\/\/localhost:\d+\/\.well-known\/openid-credential-issuer --as https:\/\/localhost:\d+ --muestra \/kit\/generated\/credencial-muestra\.json --privadas auto --clave PruebaLicencia --atributos nombre,apellido,numeroLicencia$/.test(l)), llamadas.join(" | "));
     assert.equal(r.status, 0);
+  });
+});
+
+describe("K10 · lo que Certify publica se compara con el .env (la cobertura ya no es circular)", () => {
+  const fila = (r) => lineasDe(r).find((l) => /^\s*\+\.\s+\S+\s+Los atributos del \.env/.test(l)) ?? "";
+
+  test("metadata sana: la fila sale OK («3 de 3»)", async () => {
+    const r = await verificar();
+    assert.match(fila(r), /^\s*\+\.\s+OK\s+Los atributos del \.env coinciden con los que publica Certify: 3 de 3/);
+  });
+
+  test("metadata que publica 2 de los 3 atributos del .env (base desfasada o apply-credential.sh sin aplicar): FALLA, código 1, nombra el que falta", async () => {
+    retocarConfig((c) => { delete c.credential_definition.credentialSubject.numeroLicencia; });
+    const r = await verificar();
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(fila(r), /^\s*\+\.\s+FALLA\s+Los atributos del \.env/);
+    assert.match(fila(r), /numeroLicencia/);
+    assert.match(r.stdout, /\+atributos publicados FALLA/);
+    assert.match(r.stdout, /apply-credential\.sh/);
+  });
+
+  test("la metadata no publica la configuración de la clave del .env: FALLA y dice cuáles publica", async () => {
+    retocarConfig((c, m) => { m.credential_configurations_supported = { OtraCredencial: c }; });
+    const r = await verificar();
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(fila(r), /FALLA/);
+    assert.match(r.stdout, /no publica la credencial «PruebaLicencia»/);
+    assert.match(r.stdout, /OtraCredencial/);
+  });
+
+  test("la metadata publica un atributo que NO está en el .env: AVISO (la base trae algo que el .env ya no tiene)", async () => {
+    retocarConfig((c) => { c.credential_definition.credentialSubject.categoria = { display: [{ name: "Categoría", locale: "es" }] }; });
+    const r = await verificar();
+    assert.match(fila(r), /^\s*\+\.\s+AVISO\s+Los atributos del \.env/);
+    assert.match(fila(r), /categoria/);
+  });
+
+  test("sin metadata no se puede comparar: PENDIENTE (no una falla más)", async () => {
+    rutas["/.well-known/openid-credential-issuer"] = null;
+    const r = await verificar();
+    assert.match(fila(r), /^\s*\+\.\s+PENDIENTE\s+Los atributos del \.env/);
+  });
+
+  test("verify-install.sh pasa al verificador la clave y los atributos del .env (no los saca de la muestra)", async () => {
+    const r = await verificar({ KIT_NODE: "docker", KIT_DRY_RUN: "1" });
+    const orden = lineasDe(r).find((l) => l.includes("docker run"));
+    // (el modo en seco imprime con %q: las comas salen escapadas, el contenedor las recibe tal cual)
+    assert.match(orden, /--clave PruebaLicencia --atributos nombre\\?,apellido\\?,numeroLicencia$/);
+  });
+});
+
+describe("K10 · NODE_EXTRA_CA_CERTS (CA interna de la institución) llega al contenedor", () => {
+  test("definido: se monta el fichero (solo lectura) y se reenvía la variable apuntando a la copia", async () => {
+    const ca = join(kit.raiz, "ca-interna.pem");
+    writeFileSync(ca, "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n");
+    const r = await verificar({ KIT_NODE: "docker", KIT_DRY_RUN: "1", NODE_EXTRA_CA_CERTS: ca });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const orden = lineasDe(r).find((l) => l.includes("docker run"));
+    assert.ok(orden.includes(`-v ${ca}:/kit/ca-extra.pem:ro`), orden);
+    assert.match(orden, /-e NODE_EXTRA_CA_CERTS=\/kit\/ca-extra\.pem/);
+  });
+
+  test("sin definir: no se monta ni se reenvía nada (como antes)", async () => {
+    const r = await verificar({ KIT_NODE: "docker", KIT_DRY_RUN: "1" });
+    const orden = lineasDe(r).find((l) => l.includes("docker run"));
+    assert.doesNotMatch(orden, /ca-extra|NODE_EXTRA_CA_CERTS/);
+  });
+
+  test("definido pero el fichero no existe: error claro en vez de un FALLA engañoso del diagnóstico", async () => {
+    const r = await verificar({ KIT_NODE: "docker", KIT_DRY_RUN: "1", NODE_EXTRA_CA_CERTS: join(kit.raiz, "no-existe.pem") });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /NODE_EXTRA_CA_CERTS.*no existe/);
+  });
+
+  test("con node local la variable la hereda el proceso (no hace falta reenviar nada)", async () => {
+    const r = await verificar({ NODE_EXTRA_CA_CERTS: join(kit.raiz, "ca-interna.pem") });
+    assert.doesNotMatch(r.stderr, /no existe/);
   });
 });
 
