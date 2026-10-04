@@ -93,10 +93,11 @@ services:
       - ./generated/logos:/srv/logos:ro
       - caddy_data:/data
       - caddy_config:/config
-    # K13: Caddy arranca cuando Certify ya está sano. (La API de administración de Caddy, localhost:2019 dentro del
-    # contenedor, es la que usa el healthcheck: no depende de Certify ni de los certificados.)
+    # K13: Caddy arranca cuando Certify ya está sano. (La API de administración de Caddy, 127.0.0.1:2019 dentro del
+    # contenedor, es la que usa el healthcheck: no depende de Certify ni de los certificados.) T9/I2: 127.0.0.1 y no
+    # `localhost`: el wget de busybox resuelve `localhost` a ::1 primero, no cae a IPv4 y Caddy solo escucha en IPv4.
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:2019/config/"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:2019/config/"]
       interval: 30s
       timeout: 5s
       retries: 3
