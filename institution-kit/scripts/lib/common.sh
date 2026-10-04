@@ -335,6 +335,12 @@ validate_env() {
     printf '  - %s\n' "${missing[@]}" >&2
     exit 1
   fi
+  # La clave es el nombre de los ficheros del contexto y del logo (y parte de su URL): se valida aquí, antes de
+  # generar nada (el contexto, que se genera primero, ya la usa para nombrar sus ficheros).
+  if ! [[ "${CREDENTIAL_CONFIG_KEY_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+    echo "ERROR: CREDENTIAL_CONFIG_KEY_ID inválido (solo letras, dígitos, «_» y «-», sin espacios ni «/»): es el nombre de los ficheros del contexto y del logo y parte de su URL (valor: ${CREDENTIAL_CONFIG_KEY_ID})." >&2
+    exit 1
+  fi
   if [[ "${OAUTH_CLIENT_SECRET}" == "REEMPLAZAR_CON_SECRET_DE_OGTIC" ]]; then
     echo "ERROR: Configure OAUTH_CLIENT_SECRET con el valor provisto por OGTIC." >&2
     exit 1
@@ -502,7 +508,7 @@ NODE_ENV_VARS=(
   CREDENTIAL_CONFIG_KEY_ID CREDENTIAL_ATTRIBUTES CREDENTIAL_TYPE CREDENTIAL_LABELS_JSON
   CREDENTIAL_ATTRIBUTE_LABELS CREDENTIAL_DISPLAY_NAME CREDENTIAL_BG_COLOR
   CREDENTIAL_TEXT_COLOR CREDENTIAL_SCOPE CREDENTIAL_FORMAT CERTIFY_PUBLIC_URL DID_URL
-  INSTITUTION_ID INSTITUTION_DISPLAY_NAME
+  INSTITUTION_ID INSTITUTION_DISPLAY_NAME KIT_FORZAR_CONTEXTO
 )
 NODE_IMAGE="${NODE_IMAGE:-node:22-alpine}"
 

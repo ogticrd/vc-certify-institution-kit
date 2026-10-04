@@ -26,6 +26,9 @@ apply_defaults
 derive_public_url
 derive_did_url
 validate_env
+# K5: el contexto publicado es inmutable. Se comprueba/genera PRIMERO: si hay que parar («contexto nuevo =
+# clave nueva»), no se ha tocado nada más (ni properties, ni Caddyfile, ni SQL).
+"${SCRIPT_DIR}/generate-context.sh"
 write_runtime_env
 write_compose_args
 echo "  -> ${RUNTIME_ENV} (modo 600; contraseñas de base de datos y keystore)"
@@ -34,7 +37,6 @@ echo "  -> ${GENERATED_DIR}/compose-args (orden de docker compose para TLS_MODE=
 "${SCRIPT_DIR}/generate-logo.sh"
 "${SCRIPT_DIR}/generate-properties.sh"
 "${SCRIPT_DIR}/generate-caddy.sh"
-"${SCRIPT_DIR}/generate-context.sh"
 "${SCRIPT_DIR}/generate-credential-sql.sh"
 # La carpeta del DID corregido tiene que existir aunque esté vacía: docker compose la monta en Caddy
 # (si no existiera, Docker la crearía como root). generate-did.sh la rellena cuando Certify está UP.
