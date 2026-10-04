@@ -14,14 +14,14 @@ El kit levanta tres contenedores con Docker Compose:
 |---|---|
 | **Certify** (Inji Certify) | El emisor: valida a la persona, pide sus datos a la API de su institución y firma la credencial. Se construye desde este repositorio. |
 | **PostgreSQL** | Guarda la configuración de la credencial y las llaves de firma del emisor. |
-| **Caddy** | La puerta de entrada pública: entrega los documentos públicos del emisor (metadata, `did.json`, contexto y logo), reenvía el resto a Certify y **no** deja salir el panel interno de Certify (actuator) a internet. En los modos `domain` e `ip` también obtiene el certificado HTTPS. |
+| **Caddy** | La puerta de entrada pública: entrega los documentos públicos del emisor (metadata, `did.json`, contexto y logo) y reenvía a Certify **solo lo que la billetera y los verificadores usan** (lista blanca: el endpoint de emisión, la metadata, la lista de estado); todo lo demás, incluido el panel interno (actuator), la gestión de la credencial y el flujo pre-autorizado, responde 404. En los modos `domain` e `ip` también obtiene el certificado HTTPS. Los tres contenedores se reinician solos. |
 
-Además genera la configuración, corrige el documento público de identidad del emisor (`did.json`) y, al terminar, **verifica la instalación** contra su propia dirección pública.
+Además genera la configuración, corrige el documento público de identidad del emisor (`did.json`) y, al terminar, **verifica la instalación** contra su propia dirección pública (incluido que lo que Certify publica coincida con su `.env`).
 
 ## Requisitos (resumen)
 
 1. Un servidor Linux x86_64 con 4 vCPU, 8 GB de RAM y 50 GB de disco, con Docker Engine 24 o superior y Docker Compose v2.
-2. Herramientas en el servidor: `git`, `curl`, `jq`, `openssl` y `envsubst` (paquete `gettext-base` en Debian y Ubuntu).
+2. Herramientas en el servidor: `git`, `curl`, `jq`, `openssl`, `iconv` (viene con Linux) y `envsubst` (paquete `gettext-base` en Debian y Ubuntu).
 3. Salida a internet desde el servidor (imágenes de Docker, dependencias Maven en la primera construcción y Cuenta Única).
 4. Una forma de ser alcanzable desde internet por HTTPS: un dominio propio, o solo una IP pública, o un proxy inverso de la institución que ya publica el servicio.
 5. Lo que entrega OGTIC (cliente de Cuenta Única **de producción**, URL del token de la API de datos, URL de la API) y un **logo PNG** de la institución.
@@ -58,7 +58,7 @@ Se elige uno solo con `TLS_MODE` en el archivo `.env`.
 
 ## Si ya instaló una versión anterior del kit
 
-**No ejecute `./install.sh` de esta versión sobre una instalación vieja sin leer antes la sección «Para instituciones ya instaladas» de [`CHANGELOG.md`](CHANGELOG.md).** El kit nuevo exige variables nuevas, cambia la credencial y puede generar contraseñas distintas a las de su base de datos. OGTIC publicará aparte el procedimiento de migración.
+**No ejecute `./install.sh` de esta versión sobre una instalación vieja sin leer antes la sección «Para instituciones ya instaladas» de [`CHANGELOG.md`](CHANGELOG.md).** El kit nuevo exige variables nuevas y cambia la credencial. **No genera contraseñas nuevas sobre una instalación existente**: si siguen siendo `postgres` / `local`, se detiene y le explica cómo rotarlas; y si los datos de PostgreSQL están en el volumen anónimo del kit anterior, se detiene y explica cómo migrarlos al volumen con nombre. OGTIC publicará aparte el procedimiento de migración de la credencial.
 
 ## Para quien mantiene el kit
 
@@ -68,4 +68,4 @@ Las pruebas automáticas (sin Docker) usan solo Node 22. Desde la raíz del repo
 node --test "institution-kit/test/*.test.mjs"
 ```
 
-El glob entre comillas es obligatorio. El motor de verificación de `institution-kit/diagnostico/` es una copia de OGTIC con su procedencia anotada; no se edita (ver la guía, sección 12).
+El glob entre comillas es obligatorio. Con `KIT_VELOCITY_CP` apuntando a Velocity 1.7 y velocity-tools 3.1 la plantilla de la credencial se prueba con Velocity real (el CI de GitHub lo hace: `.github/workflows/kit.yml`, que además valida con `caddy validate` el Caddyfile de los tres modos). El motor de verificación de `institution-kit/diagnostico/` es una copia de OGTIC con su procedencia anotada; no se edita (ver la guía, sección 12).

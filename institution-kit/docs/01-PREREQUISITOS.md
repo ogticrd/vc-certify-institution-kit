@@ -18,6 +18,7 @@ El equipo de infraestructura debe cubrir esta sección completa antes de la inst
 - **Docker Engine 24 o superior y Docker Compose v2** (el comando `docker compose`, no `docker-compose`). Los componentes se levantan con Docker Compose.
 - **`curl` y `jq`**: `jq` lo usan los scripts para leer las respuestas del servicio.
 - **`openssl`**: el kit lo usa para generar contraseñas aleatorias.
+- **`iconv`**: viene con Linux (glibc) y macOS. El kit lo usa para escribir los acentos del nombre de la institución en el formato que Certify lee (`install.sh` se detiene si no está).
 - **`envsubst`**: viene en el paquete `gettext-base` (Debian y Ubuntu: `sudo apt-get install -y gettext-base`) o `gettext` (RHEL y Fedora). El kit lo usa para generar la configuración y `install.sh` se detiene si no está.
 
 **No hace falta instalar Node.js.** Dos pasos del kit (generar el contexto de la credencial y verificar la instalación) usan Node; si el servidor no lo tiene, los ejecutan dentro de un contenedor `node:22-alpine` que Docker descarga la primera vez.
@@ -47,7 +48,7 @@ El emisor debe ser alcanzable desde internet por HTTPS: las billeteras y los ver
 
 - Registre un subdominio DNS, por ejemplo `certify.institucion.gob.do`.
 - Agregue un registro tipo A (o AAAA) hacia la IP pública fija del servidor.
-- En el `.env` indique `CERTIFY_PUBLIC_HOST` (el dominio, sin `https://`) y `CADDY_ACME_EMAIL` (un correo de infraestructura; Let's Encrypt lo usa para avisos).
+- En el `.env` indique `CERTIFY_PUBLIC_HOST` (el dominio, **en minúsculas**, sin `https://`, sin barra final ni puerto) y `CADDY_ACME_EMAIL` (un solo correo de infraestructura; Let's Encrypt lo usa para avisos).
 
 Caddy obtiene y renueva solo el certificado HTTPS con Let's Encrypt (validación ACME HTTP-01). El servidor necesita una IP pública fija, o un mecanismo equivalente (IP reservada, DNS dinámico estable): sin ella, el registro DNS no apunta de forma confiable al emisor.
 
@@ -94,7 +95,7 @@ El puerto interno de Certify (8090) no se publica nunca: Caddy lo alcanza por la
 
 ### 2.1 Datos de la institución y de la API
 
-- **Identificador único del emisor** (`INSTITUTION_ID`). Úselo con letras, dígitos y guion bajo (`INTRANT`, `MIMARENA`): se usa para formar el nombre del tipo de credencial.
+- **Identificador único del emisor** (`INSTITUTION_ID`). Úselo con letras sin acento, dígitos y guion bajo (`INTRANT`, `MIMARENA`; **un guion `-` no vale**): se usa para formar el nombre del tipo de credencial.
 - **Nombre de la institución** (`INSTITUTION_DISPLAY_NAME`): lo ve la persona en la billetera.
 - **URL base de la API** que entrega los datos de la persona (`RESTAPI_BASE_URL`), que le indica OGTIC.
 - **Un ejemplo de la respuesta de esa API.** Los nombres de los campos que quiera incluir en la credencial salen de ahí, con la regla de nombres de la sección 3.

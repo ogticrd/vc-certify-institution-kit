@@ -82,8 +82,8 @@ CERTIFY_PUBLIC_HOST=certify.institucion.gob.do
 CADDY_ACME_EMAIL=infra@institucion.gob.do
 ```
 
-- `CERTIFY_PUBLIC_HOST`: el nombre de dominio, sin `https://`.
-- `CADDY_ACME_EMAIL`: un correo de su equipo de infraestructura. Let's Encrypt lo usa para el certificado HTTPS automático.
+- `CERTIFY_PUBLIC_HOST`: el nombre de dominio, **en minúsculas**, sin `https://`, sin barra final, sin puerto (en este modo Caddy usa el 80 y el 443), sin ruta ni `@`, con al menos dos etiquetas (`certify.institucion.gob.do`). Un nombre con acentos va en punycode (`xn--…`). Cualquier otra forma detiene el kit **antes de generar nada**, con un mensaje que nombra la variable.
+- `CADDY_ACME_EMAIL`: un correo de su equipo de infraestructura, una sola dirección. Let's Encrypt lo usa para el certificado HTTPS automático.
 
 Con `TLS_MODE=domain`, el kit no usa `SERVER_PUBLIC_IP` ni `IP_DNS_PROVIDER`. La dirección pública será `https://` + `CERTIFY_PUBLIC_HOST`. Puertos: 80 y 443 abiertos desde internet; el DNS debe apuntar ya al servidor al instalar.
 
@@ -98,8 +98,8 @@ IP_DNS_PROVIDER=sslip.io
 CADDY_ACME_EMAIL=infra@institucion.gob.do
 ```
 
-- `SERVER_PUBLIC_IP`: la IP pública del servidor donde corre Docker (no una IP interna tipo `192.168.x.x`).
-- `IP_DNS_PROVIDER`: deje `sslip.io` salvo que OGTIC le indique otro valor.
+- `SERVER_PUBLIC_IP`: la IP pública del servidor donde corre Docker (no una IP interna tipo `192.168.x.x`), en IPv4 decimal sin ceros a la izquierda (`203.0.113.10`; `999.1.1.1` o `01.2.3.4` se rechazan).
+- `IP_DNS_PROVIDER`: deje `sslip.io` salvo que OGTIC le indique otro valor (`nip.io`); es un nombre de dominio en minúsculas.
 - `CADDY_ACME_EMAIL`: correo de infraestructura para Let's Encrypt.
 
 El kit convierte la IP en un nombre usable (los puntos se reemplazan por guiones). Con `203.0.113.10`, la dirección pública será `https://203-0-113-10.sslip.io`. Con `TLS_MODE=ip`, el kit no usa `CERTIFY_PUBLIC_HOST`. Puertos: 80 y 443 abiertos desde internet.
@@ -117,15 +117,15 @@ CERTIFY_PUBLIC_URL=https://certify.institucion.gob.do
 # TRUSTED_PROXIES=private_ranges
 ```
 
-- `CERTIFY_PUBLIC_URL` es **obligatoria**: `https://` + el dominio público que sirve su proxy, sin ruta ni barra final (se admite `:puerto`). Con otro valor, el kit se detiene con un mensaje. `http://localhost` o `http://127.0.0.1` solo se admiten para pruebas locales.
+- `CERTIFY_PUBLIC_URL` es **obligatoria**: `https://` + el dominio público que sirve su proxy, **en minúsculas**, sin ruta ni barra final (se admite `:puerto`). Con otro valor, el kit se detiene con un mensaje. `http://localhost` o `http://127.0.0.1` solo se admiten para pruebas locales y solo con `KIT_PERMITIR_HTTP=1` (aun así `verify-install.sh` no podrá pasar: el diagnóstico solo habla `https`).
 - `CADDY_ACME_EMAIL` no se usa y puede quedar como esté.
 - El servidor publica **solo** `CADDY_HTTP_PORT` (8080 por defecto), que apunta al puerto 80 de Caddy. No se publica el 80 ni el 443 del servidor. Ese puerto se publica en **todas las interfaces**: protéjalo con el cortafuegos para que solo el proxy llegue a él (o, si el proxy corre en el mismo servidor, véase el prerrequisito 1.5).
-- `TRUSTED_PROXIES` indica de qué direcciones se acepta la cabecera `X-Forwarded-For`. Por defecto `private_ranges` (las redes privadas: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1 y fc00::/7). Si conoce la IP de su proxy, póngala (varias, separadas por espacio; también admite rangos `10.1.2.0/24`); es más estricto.
+- `TRUSTED_PROXIES` indica de qué direcciones se acepta la cabecera `X-Forwarded-For`. Por defecto `private_ranges` (las redes privadas: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1 y fc00::/7). Si conoce la IP de su proxy, póngala (varias, separadas por espacio; también admite rangos `10.1.2.0/24`); es más estricto. **`0.0.0.0/0` y `::/0` se rechazan**: confían en cualquier origen y cualquiera de internet podría fijar su propio `X-Forwarded-For` y hacerse pasar por una IP interna.
 
 **Qué debe hacer su proxy**
 
 1. **Terminar el HTTPS** con un certificado válido para el dominio de `CERTIFY_PUBLIC_URL`.
-2. **Reenviar todas las rutas** a `http://<este servidor>:<CADDY_HTTP_PORT>`. Caddy decide qué publicar y qué no (el kit usa las rutas `/.well-known/…`, `/v1/certify/…`, `/contextos/…` y `/logos/…`).
+2. **Reenviar todas las rutas** a `http://<este servidor>:<CADDY_HTTP_PORT>`. Caddy decide qué publicar y qué no, con una lista blanca (sección 11): solo `/.well-known/…`, `/v1/certify/issuance/credential`, `/v1/certify/.well-known/…`, la lista de estado, `/contextos/…` y `/logos/…`; lo demás es 404, incluida la raíz `/`. **Para sondear que el servicio vive** (balanceador, monitor) use `/.well-known/openid-credential-issuer`, no `/`.
 3. **Enviar `X-Forwarded-For` con la IP real del cliente.** Caddy cree en esa cabecera solo si la conexión viene de `TRUSTED_PROXIES`, y la usa para decidir quién puede ver el estado de salud interno. Si el proxy no la envía, Caddy ve la IP del propio proxy (privada), considera «interno» a cualquiera y el estado de salud (`{"status":"UP"}`, sin más detalles) queda visible desde internet. No se filtra nada más, pero no es lo que se busca.
 4. **Pasar el `Host` original.** El kit no lo necesita para enrutar (en este modo Caddy atiende cualquier `Host`, y la dirección pública que Certify publica sale de `CERTIFY_PUBLIC_URL`), pero es la práctica habitual y evita sorpresas.
 5. **No modificar ni guardar en caché** las respuestas de `/contextos/*`, `/logos/*` y `/.well-known/did.json`. El kit las sirve con `Cache-Control: no-cache` y la verificación lo exige (sección 7).
@@ -169,20 +169,20 @@ Las filas «Siempre» se piden en cualquier modo. Una variable «opcional» se p
 | Variable | ¿Se pide? | Qué es | Por defecto o ejemplo |
 |---|---|---|---|
 | `TLS_MODE` | Siempre | Cómo se publica el emisor: `domain`, `ip` o `proxy`. Cualquier otro valor detiene el kit. | `domain` |
-| `CERTIFY_PUBLIC_HOST` | Solo `domain` | Nombre de dominio del emisor, sin `https://`. | `certify.institucion.gob.do` |
-| `SERVER_PUBLIC_IP` | Solo `ip` | IP pública del servidor (no la de la red interna). | `203.0.113.10` |
-| `IP_DNS_PROVIDER` | Opcional, solo `ip` | Servicio que convierte la IP en un nombre (`sslip.io` o `nip.io`). | `sslip.io` |
-| `CADDY_ACME_EMAIL` | `domain` e `ip` (no se usa en `proxy`) | Correo de contacto para Let's Encrypt. No lo entrega OGTIC: es de su institución. | `infra@institucion.gob.do` |
-| `CERTIFY_PUBLIC_URL` | Solo `proxy` | Dirección pública que sirve su proxy: `https://<dominio>`, sin ruta ni barra final. En `domain` e `ip` el kit la calcula y se ignora lo que ponga aquí. | `https://certify.institucion.gob.do` |
-| `CADDY_HTTP_PORT` | Opcional, solo `proxy` | Puerto del servidor donde Caddy escucha HTTP para su proxy (1 a 65535). Se publica en todas las interfaces. | `8080` |
-| `TRUSTED_PROXIES` | Opcional, solo `proxy` | Direcciones o redes (separadas por espacio) cuyo `X-Forwarded-For` se acepta; `private_ranges` o IP/CIDR. | `private_ranges` |
+| `CERTIFY_PUBLIC_HOST` | Solo `domain` | Nombre de dominio del emisor: minúsculas, sin `https://`, sin barra final, sin puerto, sin `@`, al menos dos etiquetas (acentos en punycode). Si no cumple, el kit se detiene antes de generar nada. | `certify.institucion.gob.do` |
+| `SERVER_PUBLIC_IP` | Solo `ip` | IP pública del servidor (no la de la red interna), IPv4 decimal válida. | `203.0.113.10` |
+| `IP_DNS_PROVIDER` | Opcional, solo `ip` | Servicio que convierte la IP en un nombre (`sslip.io` o `nip.io`), en minúsculas. | `sslip.io` |
+| `CADDY_ACME_EMAIL` | `domain` e `ip` (no se usa en `proxy`) | Correo de contacto para Let's Encrypt: una sola dirección, sin espacios ni saltos de línea. No lo entrega OGTIC: es de su institución. | `infra@institucion.gob.do` |
+| `CERTIFY_PUBLIC_URL` | Solo `proxy` | Dirección pública que sirve su proxy: `https://<dominio>` en minúsculas, sin ruta ni barra final. En `domain` e `ip` el kit la calcula y se ignora lo que ponga aquí. | `https://certify.institucion.gob.do` |
+| `CADDY_HTTP_PORT` | Opcional, solo `proxy` | Puerto del servidor donde Caddy escucha HTTP para su proxy (1 a 65535, sin ceros a la izquierda). Se publica en todas las interfaces. | `8080` |
+| `TRUSTED_PROXIES` | Opcional, solo `proxy` | Direcciones o redes (separadas por espacio) cuyo `X-Forwarded-For` se acepta; `private_ranges` o IP/CIDR. `0.0.0.0/0` y `::/0` se rechazan. | `private_ranges` |
 
 **Institución y API de datos**
 
 | Variable | ¿Se pide? | Qué es | Por defecto o ejemplo |
 |---|---|---|---|
-| `INSTITUTION_ID` | Siempre | Identificador único de su institución ante OGTIC. Con letras, dígitos y `_` (forma el tipo `<ID>Credential`). | `INTRANT` |
-| `INSTITUTION_DISPLAY_NAME` | Siempre | Nombre que ve la persona en la billetera. | `INTRANT` |
+| `INSTITUTION_ID` | Siempre | Identificador único de su institución ante OGTIC. Solo letras sin acento, dígitos y `_`, sin empezar por dígito (**un guion no vale**: forma el tipo `<ID>Credential`). | `INTRANT` |
+| `INSTITUTION_DISPLAY_NAME` | Siempre | Nombre que ve la persona en la billetera. Admite acentos y la comilla simple (el kit los escribe en el formato que Certify lee); no admite `\`, `$`, `{`, `}` ni saltos de línea. Si tiene espacios, entre comillas en el `.env`. | `INTRANT` |
 | `RESTAPI_BASE_URL` | Siempre | Dirección base de la API que entrega los datos de la persona. | `https://api.ogtic.gob.do/intrant` |
 | `RESTAPI_TOKEN_URL` | Siempre | Dirección donde Certify pide el token de la **API de datos** (no el de la persona ni el de Cuenta Única). La entrega OGTIC; no hay valor por defecto. Debe ser una URL `http(s)` sin espacios. | (la de OGTIC) |
 | `RESTAPI_SCOPE_ENDPOINT_MAPPING` | Opcional | Cómo se consulta la API según el permiso del token. Déjelo como viene salvo indicación de OGTIC. | `{'openid offline_access profile email': '/:national_id','openid': '/:national_id'}` |
@@ -192,7 +192,7 @@ Las filas «Siempre» se piden en cualquier modo. Una variable «opcional» se p
 | Variable | ¿Se pide? | Qué es | Por defecto o ejemplo |
 |---|---|---|---|
 | `OAUTH_CLIENT_ID` | Siempre | Identificador del cliente de su institución en Cuenta Única **de producción**. Lo entrega OGTIC. El marcador `CAMBIAR-ME` detiene el kit. | (el de OGTIC) |
-| `OAUTH_CLIENT_SECRET` | Siempre | Clave de ese cliente. Lo entrega OGTIC. El marcador `REEMPLAZAR_CON_SECRET_DE_OGTIC` detiene el kit. **Nunca se envía a OGTIC ni se escribe en pantalla.** | (el de OGTIC) |
+| `OAUTH_CLIENT_SECRET` | Siempre | Clave de ese cliente. Lo entrega OGTIC. El marcador `REEMPLAZAR_CON_SECRET_DE_OGTIC` detiene el kit. No admite `$`, `\`, comillas ni espacios (sección 11). **Nunca se envía a OGTIC ni se escribe en pantalla.** | (el de OGTIC) |
 | `AUTH_ISSUER_URL` | Opcional | Servidor de autorización de las personas. Solo cámbielo para pruebas. **Sin barra final**: el emisor del token se compara tal cual. | `https://auth.cuentaunica.gob.do` |
 
 **Credencial**
@@ -215,9 +215,8 @@ Las filas «Siempre» se piden en cualquier modo. Una variable «opcional» se p
 
 | Variable | ¿Se pide? | Qué es | Por defecto o ejemplo |
 |---|---|---|---|
-| `POSTGRES_PASSWORD` | Opcional | Contraseña de la base de datos. Si deja `postgres` o la vacía, el kit genera una aleatoria. Solo instalaciones nuevas (sección 11). | `postgres` |
-| `KEYSTORE_PASSWORD` | Opcional | Contraseña del almacén de llaves de Certify. Si deja `local` o la vacía, el kit genera una aleatoria. Solo instalaciones nuevas (sección 11). | `local` |
-| `KIT_CONSERVAR_SECRETOS_POR_DEFECTO` | Opcional | Con cualquier valor no vacío (por ejemplo `1`), el kit **no** genera contraseñas y deja `postgres` y `local`. Para instalaciones que ya existen con esos valores (sección 11). | (sin definir) |
+| `POSTGRES_PASSWORD` | Opcional | Contraseña de la base de datos. Si deja `postgres` o la vacía, el kit genera una aleatoria **solo en una instalación nueva**; en una existente con el valor por defecto, el kit se detiene (sección 11). Una contraseña propia no admite `$`, `\`, comillas (simples, dobles o invertidas), espacios ni saltos de línea. | `postgres` |
+| `KEYSTORE_PASSWORD` | Opcional | Contraseña del almacén de llaves de Certify. Misma regla que la anterior (`local` por defecto; sección 11). | `local` |
 | `POSTGRES_USER` | Opcional | Usuario de la base de datos. | `postgres` |
 | `POSTGRES_DB` | Opcional | Nombre de la base de datos. | `inji_certify` |
 | `RESTAPI_PLUGIN_JAR` | Opcional | Ruta a un plugin RestAPI distinto del que trae el repositorio (`certify-service/loader_path/certify/restapi-dataprovider-plugin-*.jar`). Solo si OGTIC se lo indica. | (sin definir) |
@@ -227,7 +226,10 @@ Las filas «Siempre» se piden en cualquier modo. Una variable «opcional» se p
 | Variable | Con qué comando | Para qué |
 |---|---|---|
 | `NO_REGENERAR=1` | `apply-credential.sh` | Aplica el SQL ya generado sin regenerar la configuración. |
-| `DRY_RUN=1` | `apply-credential.sh` | Regenera los ficheros e imprime la orden de `psql` sin ejecutarla. |
+| `DRY_RUN=1` | `apply-credential.sh` | Regenera los ficheros (salvo `generated/contextos/`, que no se toca: solo se comprueba) e imprime las órdenes de `psql` y de reinicio de Certify sin ejecutarlas. |
+| `KIT_FORZAR_CONTEXTO=1` | scripts de generación | Sobrescribe un contexto ya publicado con otro contenido. **Invalida las credenciales ya emitidas con esa clave**; use una `CREDENTIAL_CONFIG_KEY_ID` nueva en su lugar (sección 5). |
+| `KIT_PERMITIR_HTTP=1` | scripts de generación | Admite `http://localhost` / `http://127.0.0.1` en `CERTIFY_PUBLIC_URL` (solo pruebas locales). |
+| `NODE_EXTRA_CA_CERTS=<fichero .pem>` | `verify-install.sh` | Autoridad certificadora interna de su institución (por ejemplo, el proxy firma con una CA propia): se monta en el contenedor de Node y se reenvía. |
 | `KIT_NODE=auto\|local\|docker` | `verify-install.sh` | Dónde corre Node: `auto` (por defecto) usa el `node` local si es la versión 22 o superior y, si no, un contenedor; `local` y `docker` fuerzan una u otra. |
 | `KIT_DRY_RUN=1` | `verify-install.sh` | Imprime la orden de Node en vez de ejecutarla. |
 | `VERIFY_PRIVADAS=auto\|1\|0` | `verify-install.sh` | Si la verificación puede conectarse a direcciones privadas. `auto` lo permite solo si la dirección pública resuelve a una IP privada o local (el propio servidor, un proxy interno). |
@@ -318,7 +320,7 @@ Si pone un `DID_URL` externo y no publica el archivo allí, la verificación de 
 
 ### 4.7 Contraseñas de la base de datos y del almacén de llaves
 
-`POSTGRES_PASSWORD` y `KEYSTORE_PASSWORD` traen los valores de siempre (`postgres`, `local`). **En una instalación nueva, déjelos así**: el kit genera contraseñas aleatorias de 64 caracteres y las guarda solo en `generated/.env.runtime`. El detalle, y qué hacer en una instalación existente, está en la sección 11.
+`POSTGRES_PASSWORD` y `KEYSTORE_PASSWORD` traen los valores de siempre (`postgres`, `local`). **En una instalación nueva, déjelos así**: el kit genera contraseñas aleatorias de 64 caracteres y las guarda solo en `generated/.env.runtime`. **En una instalación que ya existe con esos valores, el kit se detiene** y le explica cómo rotarlas a mano: nunca genera contraseñas nuevas sobre una base o un almacén de llaves ya creados. El detalle está en la sección 11.
 
 ### 4.8 Guardar y salir
 
@@ -342,7 +344,9 @@ Esta sección explica la pieza que más suele sorprender. Léala antes de decidi
 
 **La regla: contexto nuevo = clave nueva.** Si necesita cambiar los atributos de una credencial que ya emitió (agregar, quitar o renombrar uno, o cambiar los tipos), no cambie el contexto existente: cree una credencial nueva con **otro `CREDENTIAL_CONFIG_KEY_ID`** (por ejemplo `DriverLicenseCredentialV2`). Tendrá su propio contexto en otra dirección y su propio logo, y las personas deberán pedirla de nuevo (**reemisión**). Los pasos están en la sección 10.
 
-**Cuidado con regenerar.** Cualquier ejecución de `install.sh`, `scripts/generate-config.sh` o `scripts/apply-credential.sh` **reescribe** `generated/contextos/<clave>.json` con los atributos que haya en ese momento en el `.env`, y Caddy lo publica de inmediato, aunque la base de datos no se haya tocado. No cambie `CREDENTIAL_ATTRIBUTES`, `CREDENTIAL_TYPE` ni `INSTITUTION_ID` (que forma el tipo por defecto) de una credencial ya emitida sin cambiar también la clave.
+**El kit lo hace cumplir.** Cuando el kit genera el contexto (`install.sh`, `scripts/generate-config.sh`, `scripts/apply-credential.sh`) lo guarda junto a una huella: `generated/contextos/<clave>.json` y `generated/contextos/<clave>.sha256`. Si ya hay un contexto publicado para esa clave **con otro contenido** (porque cambió `CREDENTIAL_ATTRIBUTES`, `CREDENTIAL_TYPE`, `INSTITUTION_ID` o la dirección pública), el kit **se niega a sobrescribirlo**: se detiene con el mensaje «contexto nuevo = clave nueva» y no cambia nada de lo publicado. Con la misma lista de atributos no hace nada (reordenar los atributos tampoco cuenta como cambio). `scripts/apply-credential.sh` con `DRY_RUN=1` no escribe nada en `generated/contextos/`: solo comprueba.
+
+Si de verdad necesita sobrescribirlo (por ejemplo, una prueba que nunca emitió credenciales), `KIT_FORZAR_CONTEXTO=1` lo permite con un aviso: **invalida todas las credenciales ya emitidas con esa clave**. Lo correcto es una clave nueva (sección 10.2).
 
 Cambiar la dirección pública del emisor (otro dominio) también cambia la dirección del contexto: es, a efectos prácticos, una credencial nueva.
 
@@ -363,11 +367,12 @@ Si no existe `.env`, el script lo crea desde `.env.example` y se detiene para qu
 
 | Fase | Qué ocurre | Si falla |
 |---|---|---|
-| 1. Herramientas | Comprueba `docker`, `docker compose` (v2), `curl`, `jq`, `envsubst` y `openssl`. | Se detiene y dice cuál falta. |
-| 2. Lectura y validación del `.env` | Calcula la dirección pública y el DID, aplica los valores por defecto, genera las contraseñas si hacen falta (sección 11) y valida todo: variables obligatorias, marcadores, `RESTAPI_TOKEN_URL`, `AUTH_ISSUER_URL`, logo PNG, nombres de atributos. | Se detiene con `ERROR:` y el nombre de la variable. Corrija el `.env` y repita. |
-| 3. Generación de la configuración | Escribe en `generated/`: `.env.runtime` (permisos 600, solo contraseñas y direcciones), `compose-args` (la orden de `docker compose` de su modo), el logo, la configuración de Certify, el `Caddyfile`, el contexto propio, el SQL de la credencial y la credencial de muestra. | Mensaje de error del generador (por ejemplo un nombre de atributo no válido). |
+| 1. Herramientas | Comprueba `docker`, `docker compose` (v2), `curl`, `jq`, `envsubst`, `openssl` e `iconv`. | Se detiene y dice cuál falta. |
+| 2. Lectura y validación del `.env` | Calcula la dirección pública y el DID, aplica los valores por defecto y **valida todo antes de generar nada**: formato del `.env`, nombre público, IP y correo, variables obligatorias, marcadores, `RESTAPI_TOKEN_URL`, `AUTH_ISSUER_URL`, logo PNG, nombres de atributos, caracteres de las contraseñas. Solo después resuelve las contraseñas (sección 11): las genera si es una instalación nueva y se detiene si es una existente con las de por defecto. | Se detiene con `ERROR:` y el nombre de la variable. Corrija el `.env` y repita. |
+| 3. Generación de la configuración | Escribe en `generated/` (carpeta privada, permisos 700): primero el contexto propio y su huella (si ya hay uno publicado con otro contenido, se detiene: sección 5); después `.env.runtime` (permisos 600: las contraseñas y el secreto OAuth), `compose-args` (la orden de `docker compose` de su modo), el logo, la configuración de Certify (sin secretos), el `Caddyfile`, el SQL de la credencial y la credencial de muestra. | Mensaje de error del generador (por ejemplo un nombre de atributo no válido o «contexto nuevo = clave nueva»). |
+| 3b. Base de datos de una instalación anterior | Si hay un contenedor de la base cuyos datos están en un volumen anónimo (kit anterior), se detiene y explica cómo migrarlo (sección 12). | Siga los pasos de la sección 12. |
 | 4. Construcción | `docker compose build`: construye la imagen de Certify desde el repositorio. **La primera vez tarda varios minutos; no la cancele.** | Revise el error de la construcción (acceso a internet, memoria). |
-| 5. Arranque | `docker compose up -d`: levanta base de datos, Certify y Caddy. La base crea el esquema y carga la credencial solo en su primer arranque. | `docker compose … logs`. |
+| 5. Arranque | `docker compose up -d`: levanta base de datos, Certify y Caddy, que arrancan solos tras un reinicio del servidor (`restart: unless-stopped`). Caddy espera a que Certify esté **sano** (tiene un chequeo de salud interno; el primer arranque tarda un par de minutos). La base crea el esquema y carga la credencial solo en su primer arranque. | Si un servicio no llega a estar sano, el script lo dice: `docker compose … ps` y `… logs certify`. |
 | 6. Mensajes del modo | En `domain` e `ip` muestra los registros de Caddy durante 30 segundos (la obtención del certificado). En `proxy` indica el puerto y recuerda configurar el proxy. | — |
 | 7. Espera de Certify | Pregunta el estado de salud por la red interna cada 5 segundos, hasta 60 veces (5 minutos). | `ERROR: Certify no respondió UP tras 300s`: revise `docker compose … logs certify`. |
 | 8. Corrección del DID | Ejecuta `scripts/generate-did.sh` (sección 4.6). | Mensaje de error: ¿está Certify en pie? |
@@ -441,14 +446,15 @@ credential_endpoint: https://certify.institucion.gob.do/v1/certify/issuance/cred
  11. OK        Tipos y contextos guardados en el orden que Certify busca: ...
   +. OK        El @context de la metadata está completo (W3C, propio y suite): 1 credencial publica ...
   +. OK        Cobertura de firma sobre la credencial de muestra: 3 de 3 atributos firmados (cobertura 100 %): ...
+  +. OK        Los atributos del .env coinciden con los que publica Certify: 3 de 3 atributos publicados (...).
 
-Resumen: 11/11 (+cobertura OK, +@context de la metadata OK) · FALLA 0 · AVISO 0 · PENDIENTE 0
+Resumen: 11/11 (+cobertura OK, +@context de la metadata OK, +atributos publicados OK) · FALLA 0 · AVISO 0 · PENDIENTE 0
 Resultado: la instalación pasa la verificación.
 ```
 
 La línea **Direcciones privadas** dice si la verificación puede conectarse a direcciones de red interna. Por seguridad, por defecto no; solo lo permite si su dirección pública resuelve a una IP privada o local (por ejemplo, un proxy interno o el propio servidor). Con `VERIFY_PRIVADAS=1` o `=0` lo fuerza.
 
-El **Resumen** cuenta las 11 comprobaciones del diagnóstico (`11/11`), seguidas de las dos propias del kit (marcadas con `+`) y del total de `FALLA`, `AVISO` y `PENDIENTE`. La última línea es el veredicto: «la instalación pasa la verificación», «sin fallas, pero hay comprobaciones que no se pudieron evaluar» (hay `PENDIENTE` sin `FALLA`) o «la verificación FALLÓ».
+El **Resumen** cuenta las 11 comprobaciones del diagnóstico (`11/11`), seguidas de las tres propias del kit (marcadas con `+`) y del total de `FALLA`, `AVISO` y `PENDIENTE`. La última línea es el veredicto: «la instalación pasa la verificación», «sin fallas, pero hay comprobaciones que no se pudieron evaluar» (hay `PENDIENTE` sin `FALLA`) o «la verificación FALLÓ».
 
 ### Qué comprueba cada línea y qué hacer si no es `OK`
 
@@ -467,11 +473,14 @@ El **Resumen** cuenta las 11 comprobaciones del diagnóstico (`11/11`), seguidas
 | **10** El DID del emisor resuelve y autoriza su clave | Que `did.json` se descarga y sus `assertionMethod` listan la llave. | `FALLA`: ejecute `./scripts/generate-did.sh` y repita. Con `DID_URL` externo, fallará hasta que publique el archivo allí. |
 | **11** Tipos y contextos guardados en el orden que Certify busca | Que `credential_type` y `context` en la base están ordenados. Si no, Certify no encuentra la plantilla y emitir falla con «CredentialConfig not found». | El kit los guarda ordenados. Si falla, alguien tocó la base: ejecute `./scripts/apply-credential.sh` y reinicie Certify (sección 10). |
 | **+** El `@context` de la metadata está completo | Que la metadata publica el contexto del estándar, el propio y el de la suite, y el tipo `VerifiableCredential`. | `FALLA`: aplique la credencial (sección 10) y **reinicie Certify**, que guarda la configuración en memoria. |
+| **+** Los atributos del `.env` coinciden con los que publica Certify | Que la metadata que **Certify publica de verdad** (leída de su base de datos) lista los mismos atributos que su `.env` para su `CREDENTIAL_CONFIG_KEY_ID`. La cobertura de abajo se calcula sobre una muestra que el kit genera desde ese mismo `.env`, así que no detectaba una base desfasada; esta sí. | `FALLA` («faltan …» o «no publica la credencial …»): la base no coincide con el `.env`. Ejecute `./scripts/apply-credential.sh` (que reinicia Certify), o use una clave nueva si cambió los atributos (sección 10.2). `AVISO`: la base trae atributos que el `.env` ya no tiene. |
 | **+** Cobertura de firma sobre la credencial de muestra | Que, sobre una credencial de ejemplo construida con **su** plantilla, el 100 % de los atributos entra en la firma. El kit nunca muestra valores, solo nombres de campo. | `FALLA`: «No firmados: …». Es el defecto que el kit existe para evitar; ver sección 5. |
 
 ### Casos frecuentes
 
 - **Modo proxy, recién instalado: casi todo en `FALLA`, empezando por la 1.** Su proxy no reenvía aún. Configure el proxy (sección 3C) y repita `./scripts/verify-install.sh`.
+- **Si la salud de Certify falla**, el informe lo cuenta como una línea `FALLA` más (`Certify responde UP por la red interna`) y el veredicto final dice «la verificación FALLÓ»; ya no aparece «pasa la verificación» con código 1.
+- **Autoridad certificadora propia (proxy con CA interna).** Si la comprobación 1 falla con un error de certificado en una instalación que sí responde, apunte `NODE_EXTRA_CA_CERTS` al `.pem` de su CA (`NODE_EXTRA_CA_CERTS=/ruta/ca.pem ./scripts/verify-install.sh`): se monta en el contenedor de Node.
 - **Modo dominio o IP, recién instalado: `No responde` o error de certificado.** Let's Encrypt aún no emitió el certificado. Espere unos minutos, mire `docker compose $(cat generated/compose-args) logs caddy` y confirme que el DNS apunta al servidor y que el 80 está abierto. Repita.
 - **Todo en `OK`, pero con `PENDIENTE` o `AVISO`.** El código de salida es 0, pero lea cada línea: suele indicar algo que quedó sin evaluar.
 - **El servidor no puede alcanzar su propia dirección pública** (algunas redes no lo permiten desde dentro): las comprobaciones 1 a 11 fallarán aunque desde internet todo funcione. Verifique desde otra red con los `curl` de la sección 8.
@@ -505,6 +514,14 @@ docker compose $(cat generated/compose-args) exec -T caddy wget -qO- http://cert
 ```
 
 Debe responder `{"status":"UP"}`. Desde internet, cualquier dirección bajo `/v1/certify/actuator/` debe responder **404**. (Puede responder 200 desde el propio servidor, que cuenta como red interna.)
+
+**Lo que NO debe llegar a Certify desde internet.** Compruebe que la fábrica de credenciales y la gestión de la credencial están cerradas (deben responder **404**, no 200, 401 ni 403):
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST https://certify.institucion.gob.do/v1/certify/pre-authorized-data
+curl -s -o /dev/null -w "%{http_code}\n" https://certify.institucion.gob.do/v1/certify/credential-configurations/DriverLicenseCredential
+curl -s -o /dev/null -w "%{http_code}\n" https://certify.institucion.gob.do/
+```
 
 **Prueba desde otra red:** abra la dirección de `openid-credential-issuer` desde un celular o computadora fuera de su red. Si responde solo desde el servidor pero no desde fuera, el servicio está bien pero la red pública aún no llega (revise puertos y cortafuegos en los prerrequisitos).
 
@@ -543,15 +560,9 @@ El `.env` se lee al generar la configuración, pero **la credencial se carga en 
 
 El script valida el `.env`, regenera la configuración (incluidos logo, contexto y SQL), aplica el SQL a la base **sin recrearla** y muestra al final la fila resultante (sin la plantilla). Es **idempotente**: puede ejecutarlo cuantas veces quiera. **Conserva el estado (`status`)** de la credencial.
 
-Variantes: `NO_REGENERAR=1 ./scripts/apply-credential.sh` aplica el SQL que ya está generado sin regenerar nada; `DRY_RUN=1 ./scripts/apply-credential.sh` regenera los ficheros y solo imprime la orden de `psql`.
+Variantes: `NO_REGENERAR=1 ./scripts/apply-credential.sh` aplica el SQL que ya está generado sin regenerar nada; `DRY_RUN=1 ./scripts/apply-credential.sh` regenera los ficheros (sin tocar `generated/contextos/`) y solo imprime las órdenes de `psql` y de reinicio.
 
-3. **Reinicie Certify** para que use el cambio de inmediato:
-
-```bash
-docker compose $(cat generated/compose-args) restart certify
-```
-
-Certify guarda en memoria la configuración de la credencial (hasta una hora, según su configuración). Sin reiniciar, el cambio puede tardar en verse. Espere a que vuelva a estar `UP` (un par de minutos).
+3. **Certify se reinicia solo**: al terminar de aplicar el SQL, el script ejecuta `docker compose … restart certify` (solo Certify; ni la base ni Caddy). Certify guarda en memoria la configuración de la credencial (hasta una hora, según su configuración) y, sin reiniciar, seguiría emitiendo con la anterior. Si el SQL falla, **no** reinicia. Espere a que vuelva a estar `UP` (un par de minutos).
 
 4. Repita la verificación: `./scripts/verify-install.sh`.
 
@@ -559,14 +570,22 @@ El logo cambia de inmediato porque Caddy lo sirve desde el disco; el resto neces
 
 ### 10.2 Cuándo NO basta: cambio de atributos
 
-Si cambia los **atributos** (`CREDENTIAL_ATTRIBUTES`), los **tipos** (`CREDENTIAL_TYPE` o `INSTITUTION_ID`) o la **dirección pública** del emisor, `apply-credential.sh` **no es suficiente y no es seguro** sobre la misma clave: reescribiría el contexto ya publicado con otro contenido (sección 5) y las credenciales emitidas dejarían de verificarse.
+Si cambia los **atributos** (`CREDENTIAL_ATTRIBUTES`), los **tipos** (`CREDENTIAL_TYPE` o `INSTITUTION_ID`) o la **dirección pública** del emisor con la misma clave, el kit **se detiene** («contexto nuevo = clave nueva», sección 5): reescribiría el contexto ya publicado y las credenciales emitidas dejarían de verificarse.
 
 Cámbielo así:
 
 1. Elija un **`CREDENTIAL_CONFIG_KEY_ID` nuevo** (por ejemplo `DriverLicenseCredentialV2`) y los atributos nuevos en el `.env`.
-2. Ejecute `./scripts/apply-credential.sh`: crea una configuración nueva, con su contexto en `…/contextos/<clave nueva>.json` y su logo propio, y reinicie Certify (paso 3 anterior).
-3. **No borre** `generated/contextos/<clave vieja>.json` ni la carpeta `generated/contextos/`: las credenciales ya emitidas siguen apuntando a ese contexto y necesitan poder descargarlo. Incluya esa carpeta en sus respaldos.
-4. Avise a OGTIC: la clave nueva es una credencial nueva que debe registrarse, y la configuración vieja sigue activa en el emisor (el kit no la retira); coordine con OGTIC cómo se retira. Las personas deben pedir de nuevo su credencial (reemisión).
+2. Ponga la configuración **vieja** en `inactive` en la base, para que deje de ofrecerse:
+
+   ```bash
+   printf "UPDATE certify.credential_config SET status = 'inactive' WHERE credential_config_key_id = 'DriverLicenseCredential';\n" \
+     | docker compose $(cat generated/compose-args) exec -T database psql -U postgres -d inji_certify
+   ```
+
+   (Con su `POSTGRES_USER` y `POSTGRES_DB` si los cambió.) `apply-credential.sh` conserva ese estado: no la reactiva.
+3. Ejecute `./scripts/apply-credential.sh`: crea una configuración nueva, con su contexto en `…/contextos/<clave nueva>.json` y su logo propio, y reinicia Certify.
+4. **No borre** `generated/contextos/<clave vieja>.json` ni la carpeta `generated/contextos/`: las credenciales ya emitidas siguen apuntando a ese contexto y necesitan poder descargarlo. Incluya esa carpeta en sus respaldos.
+5. Avise a OGTIC: la clave nueva es una credencial nueva que debe registrarse, y coordine con ellos cómo se retira la vieja. Las personas deben pedir de nuevo su credencial (reemisión).
 
 ---
 
@@ -574,27 +593,57 @@ Cámbielo así:
 
 ### Qué genera el kit y dónde queda
 
-- **Contraseñas.** Si `POSTGRES_PASSWORD` vale `postgres` (o está vacía), o `KEYSTORE_PASSWORD` vale `local` (o está vacía), el kit genera una contraseña aleatoria de 64 caracteres (`openssl rand -hex 32`) y la guarda **solo** en `generated/.env.runtime` (permisos 600). **No se escribe en ninguna pantalla ni registro** y se **reutiliza** en cada ejecución (regenerar la configuración o aplicar la credencial no la cambia). Al generarla, el kit avisa con un `AVISO` en pantalla, sin mostrarla.
+- **Contraseñas.** Si `POSTGRES_PASSWORD` vale `postgres` (o está vacía), o `KEYSTORE_PASSWORD` vale `local` (o está vacía), **en una instalación nueva** el kit genera una contraseña aleatoria de 64 caracteres (`openssl rand -hex 32`) y la guarda **solo** en `generated/.env.runtime` (permisos 600). **No se escribe en ninguna pantalla ni registro** y se **reutiliza** en cada ejecución (regenerar la configuración o aplicar la credencial no la cambia). Al generarla, el kit avisa con un `AVISO` en pantalla, sin mostrarla.
+- **Dónde está cada secreto.** Las contraseñas y el `OAUTH_CLIENT_SECRET` viven en dos sitios: su `.env` y `generated/.env.runtime` (600). **Los ficheros `generated/config/*.properties` ya no los llevan**: Certify los recibe como variables de entorno del contenedor, que `docker compose` lee de `generated/.env.runtime`, y las properties solo tienen marcadores (`${KIT_DB_PASSWORD}`…). Esos ficheros son legibles por todos porque Certify corre dentro del contenedor con otro usuario (uid 1001) y los lee tal cual; no hay nada secreto en ellos. La carpeta `generated/` es privada (permisos 700).
 - **`generated/` no se sube a ningún repositorio** (está ignorado) y contiene secretos: respáldelo en un lugar protegido.
-- **Los ficheros `generated/config/*.properties` contienen contraseñas** (las de la base de datos y del almacén de llaves) y el `OAUTH_CLIENT_SECRET`. Trátelos como secretos: no los copie a correos, tickets ni repositorios. Hoy tienen permisos de lectura para todos los usuarios del servidor, así que limite quién tiene acceso a una sesión en él.
-- `.env` contiene `OAUTH_CLIENT_SECRET`: use `chmod 600 .env`.
+- **`.env` contiene `OAUTH_CLIENT_SECRET`**: `install.sh` lo crea con permisos 600 y los scripts avisan si es legible por otros usuarios (`AVISO: …/.env es legible por otros usuarios (modo 644)`); corríjalo con `chmod 600 .env`.
+- **Caracteres admitidos.** Una contraseña o secreto que usted escriba no puede contener `$`, `\`, comillas (simples, dobles o invertidas), espacios ni saltos de línea: `docker compose`, Spring y la base de datos los leen de formas distintas y la contraseña dejaría de ser la misma en cada sitio (Postgres se crearía con una y Certify se conectaría con otra). Use letras, dígitos y `. _ @ % + = -`, por ejemplo `openssl rand -hex 32`. El kit lo comprueba y se detiene sin imprimir la contraseña.
 
-### Solo para instalaciones nuevas
+### Solo para instalaciones nuevas (y qué hace el kit si ya existe una)
 
-La contraseña de PostgreSQL queda grabada en el volumen de datos al crear la base, y la del almacén de llaves queda dentro del almacén de Certify desde el primer arranque. **Cambiarlas después en `.env.runtime` rompe el arranque**: la base rechaza la conexión y Certify no puede abrir sus llaves.
+La contraseña de PostgreSQL queda grabada en el volumen de datos al crear la base, y la del almacén de llaves queda dentro del almacén de Certify desde el primer arranque. **Cambiarlas después rompe el arranque**: la base rechaza la conexión y Certify no puede abrir sus llaves. Por eso el kit **nunca genera ni regenera contraseñas sobre una instalación existente**. Hay instalación existente si existe `generated/.env.runtime` o, con Docker, un contenedor de la base o un volumen de datos o del almacén de llaves de este kit.
 
-**Si ya tiene una instalación con `postgres` / `local` y va a ejecutar este kit sobre ella**, antes de ejecutar nada elija una de estas dos:
+- Si ya hay contraseñas **generadas por el kit** en `generated/.env.runtime`, se reutilizan.
+- Si escribió contraseñas **propias** en el `.env`, se respetan.
+- Si hay instalación existente y las contraseñas siguen siendo `postgres` / `local` (o están vacías), **`install.sh` se detiene** con un mensaje, sin tocar nada. Debe **rotarlas a mano**, una sola vez:
 
-- **Conservar los valores actuales.** Agregue al `.env`:
+  1. Genere dos contraseñas: `openssl rand -hex 32` (dos veces).
+  2. **PostgreSQL:** cámbiela en la base, con la instalación en marcha:
 
-  ```bash
-  KIT_CONSERVAR_SECRETOS_POR_DEFECTO=1
-  ```
+     ```bash
+     printf "ALTER USER postgres PASSWORD '<la nueva>';\n" \
+       | docker compose $(cat generated/compose-args) exec -T database psql -U postgres -d inji_certify
+     ```
+  3. **Almacén de llaves:** haga primero una copia del volumen `…_certify-pkcs12` y cambie la contraseña de `local.p12`:
 
-  El kit no genera contraseñas y deja `postgres` y `local`. (Rótelas después con su equipo de seguridad: para el almacén de llaves ya creado con `local` no hay un cambio seguro desde el kit.)
-- **Fijar la contraseña que ya tiene la base.** Cámbiela primero en la base (`ALTER USER postgres PASSWORD '…'`) y escríbala en `POSTGRES_PASSWORD`, distinta de `postgres`. Con valores propios el kit no genera nada. Evite `$`, `#` y comillas en una contraseña propia: los valores generados por el kit son solo letras y números.
+     ```bash
+     docker compose $(cat generated/compose-args) run --rm --no-deps --entrypoint keytool certify \
+       -storepasswd -storetype PKCS12 -keystore /home/mosip/CERTIFY_PKCS12/local.p12
+     ```
 
-Si ya ejecutó `install.sh` y generó contraseñas nuevas sobre una instalación existente, Certify no podrá conectar con la base. Agregue `KIT_CONSERVAR_SECRETOS_POR_DEFECTO=1` y vuelva a ejecutar `./install.sh`.
+     (El kit no ha probado este paso con un Certify real: no lo haga sin la copia, y confírmelo con OGTIC.)
+  4. Escriba las dos nuevas en `POSTGRES_PASSWORD` y `KEYSTORE_PASSWORD` del `.env` y vuelva a ejecutar `./install.sh`.
+
+La variable `KIT_CONSERVAR_SECRETOS_POR_DEFECTO` de versiones anteriores **ya no existe**: si la tiene en su `.env`, el kit la ignora y avisa. Dejar `postgres` y `local` sin rotar no es una opción.
+
+Si ya ejecutó una versión anterior de `install.sh` que generó contraseñas nuevas sobre una instalación existente y Certify no conecta con la base, las contraseñas que están en `generated/.env.runtime` no son las de la base: ponga en el `.env` (`POSTGRES_PASSWORD`, `KEYSTORE_PASSWORD`) las que la base y el almacén de llaves realmente tienen y repita `./install.sh`.
+
+### Qué publica Caddy: una lista blanca
+
+El kit **no** publica `/v1/certify/` entero. Certify trae, además de lo que usa la billetera, rutas que no deben ser alcanzables desde internet: el flujo de código pre-autorizado (emite una credencial completa **sin persona**), la gestión de la configuración de la credencial (escribir o borrar su plantilla), la revocación, los certificados del servicio y la documentación de la API. En Certify estaban abiertas sin autenticación; ahora Caddy responde **404** a todas, y Certify mismo solo deja sin autenticar lo que el kit usa (el resto exige un token de Cuenta Única).
+
+| Ruta | Qué hace Caddy |
+|---|---|
+| `/.well-known/openid-credential-issuer` (y la misma bajo `/v1/certify/.well-known/…`), `did.json` y `jwks.json` de Certify | Pasan a Certify. |
+| `POST /v1/certify/issuance/credential` | Pasa a Certify: es el endpoint de emisión, que valida el token de la persona. Con otro método, 404. |
+| `GET /v1/certify/credentials/status-list/*` | Pasa: la lista de estado pública (solo lectura). |
+| `GET /v1/certify/rendering-template/*` | Pasa: la plantilla de presentación (solo lectura). |
+| `/.well-known/did.json` (el corregido), `/contextos/*`, `/logos/*` | Los sirve Caddy desde disco. |
+| `/v1/certify/actuator/health` | Solo desde redes internas; el resto del actuator, 404. |
+| `pre-authorized-data`, `credential-offer-data`, `oauth`, `credential-configurations`, `credentials/status` (revocar), `system-info`, `ledger-search`, `swagger-ui`, `v3/api-docs`, el resto de `issuance/…` y cualquier otra ruta | **404 explícito.** |
+| Todo lo que no está en la lista (incluida la raíz `/`) | **404** (antes, un 200 vacío: un balanceador lo leía como «sano»). |
+
+Si su balanceador sondea la salud, use `/.well-known/openid-credential-issuer`. Esta lista se prueba con una simulación del enrutado y se valida con el Caddy real en el CI del kit.
 
 ### El panel interno de Certify (actuator) ya no es público
 
@@ -628,9 +677,9 @@ El kit configura Certify para que **no escriba en los registros el token de acce
 
 Si se pierden la base o el almacén de llaves, el emisor tendría que crear llaves nuevas y las credenciales ya emitidas dejarían de verificarse.
 
-### Cuidado con `docker compose down`
+### `docker compose down` y los datos de PostgreSQL
 
-El kit no declara un volumen con nombre para los datos de PostgreSQL. Por eso, **no use `docker compose down`** sobre una instalación en uso: puede dejar la base de datos atrás. Para parar y arrancar use `stop` y `start`, y para aplicar cambios use `up -d` o `restart`:
+Los datos de PostgreSQL viven en un **volumen con nombre** (`…_pgdata`), así que `docker compose down` **conserva la base**: solo `down -v` o `docker volume rm` la borran. Aun así, para el uso diario es más suave parar y arrancar:
 
 ```bash
 docker compose $(cat generated/compose-args) stop        # parar
@@ -638,11 +687,14 @@ docker compose $(cat generated/compose-args) start       # arrancar de nuevo
 docker compose $(cat generated/compose-args) restart certify
 ```
 
-Un caso concreto: si en modo `ip` o `domain` Caddy se quedó con un certificado interno y hay que limpiar su volumen, **no siga el mensaje de `install.sh` que sugiere `docker compose down`**. Haga solo esto:
+Los tres servicios se reinician solos si el servidor se reinicia o un servicio cae (`restart: unless-stopped`); un `stop` manual se respeta.
+
+**Instalaciones hechas con una versión anterior del kit.** Antes, los datos estaban en un volumen **anónimo**. Al actualizar sin migrar, Docker crearía el volumen `pgdata` **vacío**: la base nueva solo traería el esquema y la credencial, y se perdería lo ya emitido (libro de emisiones, estados). Por eso `install.sh` **se detiene** si encuentra un contenedor de la base con datos en un volumen anónimo y le explica la migración, que son cinco pasos: copia de seguridad (`pg_dumpall`), parar la base, crear el contenedor con el volumen nuevo (`up --no-start database`), copiar los datos del volumen anónimo al nuevo con un contenedor `alpine`, y volver a ejecutar `./install.sh`. El kit no ha ejecutado esos pasos con un Docker real: **haga la copia del paso 1** y avise a OGTIC si algo no cuadra.
+
+Un caso concreto: si en modo `ip` o `domain` Caddy se quedó con un certificado interno y hay que limpiar su volumen, haga solo esto (la base no se toca):
 
 ```bash
-docker compose $(cat generated/compose-args) stop caddy
-docker compose $(cat generated/compose-args) rm -f caddy
+docker compose $(cat generated/compose-args) rm -sf caddy
 docker volume ls                      # busque el que termina en _caddy_data
 docker volume rm <nombre-del-volumen>
 docker compose $(cat generated/compose-args) up -d caddy
@@ -656,19 +708,19 @@ Para cambios de acceso público, API de datos o Cuenta Única, vuelva a ejecutar
 ./install.sh
 ```
 
-Regenera la configuración, reconstruye lo que haga falta, reinicia lo que cambió y vuelve a verificar. Las contraseñas generadas se reutilizan. Para cambios en la credencial, vea la sección 10.
+Regenera la configuración, reconstruye lo que haga falta, reinicia lo que cambió y vuelve a verificar. Las contraseñas generadas se reutilizan. Si cambió atributos, tipos o la dirección pública con la misma clave, el kit se detiene («contexto nuevo = clave nueva»: sección 5). Para cambios en la credencial, vea la sección 10.
 
 ### Actualizar el kit
 
 1. Lea el [`CHANGELOG.md`](../CHANGELOG.md) de la versión nueva.
 2. Respalde (arriba).
 3. Traiga la versión nueva (`git pull` de la rama que le indique OGTIC). Si modificó algún fichero del kit (por ejemplo `docker-compose.proxy.yml` para escuchar solo en `127.0.0.1`), `git` le avisará de conflictos: repita su cambio.
-4. Compare su `.env` con el `.env.example` nuevo para ver si hay variables nuevas (`diff .env.example .env` muestra las diferencias; los valores propios de su institución aparecerán como diferentes, es lo esperado). Una variable nueva obligatoria hace que el kit se detenga con un mensaje que la nombra.
+4. Si su instalación es de una versión **anterior al volumen con nombre de PostgreSQL**, `install.sh` se detendrá pidiendo la migración (arriba). Si usa las contraseñas por defecto, también se detendrá pidiendo rotarlas (sección 11). Compare su `.env` con el `.env.example` nuevo para ver si hay variables nuevas (`diff .env.example .env` muestra las diferencias; los valores propios de su institución aparecerán como diferentes, es lo esperado). Una variable nueva obligatoria hace que el kit se detenga con un mensaje que la nombra.
 5. Ejecute `./install.sh`.
 
 ### Reinstalar desde cero (solo en una instalación de pruebas)
 
-Para empezar de nuevo una instalación **sin uso** (que no haya emitido credenciales), este comando **borra la base de datos y las llaves** y es irreversible:
+Para empezar de nuevo una instalación **sin uso** (que no haya emitido credenciales), este comando **borra la base de datos (el volumen `pgdata`) y las llaves** y es irreversible:
 
 ```bash
 docker compose $(cat generated/compose-args) down -v
@@ -695,15 +747,25 @@ El motor que usa `verify-install.sh` está en `institution-kit/diagnostico/` y *
 | `CREDENTIAL_LOGO_URL ya no existe` | Quite esa línea del `.env` y use `LOGO_PATH`. |
 | `CREDENTIAL_ATTRIBUTE_LABELS … ya no se admite` | Quite esa línea y use `CREDENTIAL_LABELS_JSON` (sección 4.5). |
 | `El atributo «…» no es válido` o `choca con un término que ya definen…` | Renombre el atributo según las reglas de la sección 4.5. |
-| `El tipo «…Credential» no es válido en CREDENTIAL_TYPE` sin que usted haya puesto `CREDENTIAL_TYPE` | El tipo por defecto se forma con `INSTITUTION_ID`, que solo admite letras, dígitos y `_` (un guion, por ejemplo, no vale). Cambie `INSTITUTION_ID` o fije un `CREDENTIAL_TYPE` válido. |
+| `INSTITUTION_ID «…» no es válido` | `INSTITUTION_ID` forma el tipo por defecto (`<ID>Credential`) y solo admite letras sin acento, dígitos y `_` (un guion no vale). Cambie `INSTITUTION_ID` o fije un `CREDENTIAL_TYPE` válido. |
+| `ERROR: ya hay una instalación previa de este kit … estas contraseñas siguen siendo las de defecto` | El kit no regenera contraseñas sobre una instalación existente. Rótelas a mano (sección 11). |
+| `ERROR: la base de datos de esta instalación vive en un volumen ANÓNIMO` | Instalación de una versión anterior: siga los pasos de migración que imprime (sección 12) antes de actualizar. |
+| `contexto nuevo = clave nueva` | Cambió atributos, tipo, `INSTITUTION_ID` o la dirección pública con la misma `CREDENTIAL_CONFIG_KEY_ID`. Use una clave nueva (sección 10.2). |
+| `CERTIFY_PUBLIC_HOST no es un nombre de dominio válido` / `SERVER_PUBLIC_IP no es una dirección IPv4 válida` / `CADDY_ACME_EMAIL no es una dirección de correo válida` | Corrija el valor según la sección 3: minúsculas, sin `https://`, sin barra, sin puerto, una sola dirección. |
+| `POSTGRES_PASSWORD contiene un carácter no admitido` (o `KEYSTORE_PASSWORD`, `OAUTH_CLIENT_SECRET`) | Quite `$`, `\`, comillas, espacios y saltos de línea (sección 11). |
+| `INSTITUTION_DISPLAY_NAME no puede llevar …` | Quite `\`, `$`, `{`, `}` o los saltos de línea. Acentos y la comilla simple sí valen. |
+| `.env tiene finales de línea de Windows (CRLF)` / `no se pudo leer .env` | Conviértalo (`sed -i 's/\r$//' .env`) o ponga entre comillas los valores con espacios. |
+| `TRUSTED_PROXIES=… confía en cualquier origen` | Ponga la IP o red de su proxy (sección 3C). |
+| `AVISO: …/.env es legible por otros usuarios` | `chmod 600 .env`. |
 | `AUTH_ISSUER_URL debe ser una URL https … SIN barra final` | Quite la barra final de la dirección. |
 | `CERTIFY_PUBLIC_URL es obligatorio con TLS_MODE=proxy` | Escriba la dirección pública de su proxy (sección 3C). |
 | `Comando requerido no encontrado: envsubst` | Instale `gettext-base` (Debian/Ubuntu: `sudo apt-get install -y gettext-base`). |
-| `AVISO: se generaron contraseñas aleatorias…` | Es normal en una instalación nueva. Si la instalación **ya existía**, vea la sección 11 antes de continuar. |
+| `AVISO: se generaron contraseñas aleatorias…` | Es normal en una instalación nueva. En una existente el kit ya no las genera: se detiene (sección 11). |
 | Certify no responde `UP` o hay tiempo de espera | Espere unos minutos (el primer arranque es lento). Luego mire `docker compose $(cat generated/compose-args) logs certify`. |
 | Certify no conecta con la base de datos | Probablemente las contraseñas no coinciden con las de la base ya creada. Sección 11. |
 | El estado de salud responde JSON con `Full authentication is required` | Regenere la configuración y recree Certify: `./scripts/generate-config.sh` y `docker compose $(cat generated/compose-args) up -d --force-recreate certify`. Debe devolver `{"status":"UP"}`. |
-| Modo dominio o IP: no obtiene el certificado HTTPS | Confirme el puerto 80 abierto desde internet. En modo dominio, que el DNS apunte al servidor; en modo IP, que `sslip.io` resuelva a la IP pública. Si Caddy quedó con un certificado interno, limpie su volumen como se indica en la sección 12 (**sin** `docker compose down`). |
+| Modo dominio o IP: no obtiene el certificado HTTPS | Confirme el puerto 80 abierto desde internet. En modo dominio, que el DNS apunte al servidor; en modo IP, que `sslip.io` resuelva a la IP pública. Si Caddy quedó con un certificado interno, limpie solo su volumen como se indica en la sección 12. Justo tras instalar, la comprobación 1 puede fallar un minuto mientras se emite el certificado: repita `./scripts/verify-install.sh`. |
+| Un servicio no llega a estar sano al hacer `up -d` | `docker compose $(cat generated/compose-args) ps` y `… logs certify`. Certify tarda un par de minutos en su primer arranque. |
 | Modo IP: la URL no responde desde internet | Confirme que los puertos 80 y 443 de la IP pública llegan al servidor. |
 | Modo proxy: `Bind for 0.0.0.0:8080 failed: port is already allocated` | Otro programa usa ese puerto: cambie `CADDY_HTTP_PORT` en el `.env` y repita `./install.sh`; actualice el proxy al puerto nuevo. |
 | Modo proxy: el estado de salud se ve desde internet | Su proxy no envía `X-Forwarded-For` con la IP real. Configúrelo (sección 3C). |
