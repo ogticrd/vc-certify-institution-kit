@@ -318,6 +318,18 @@ resolve_plugin_jar() {
   export RESTAPI_PLUGIN_JAR_RESOLVED
 }
 
+# K6: las contraseñas y el secreto OAuth llegan a tres sitios que las leen distinto: `docker compose
+# --env-file` (expande `$nombre` y `${…}`), Spring (`\` es un escape, `${…}` un marcador) y la propia base.
+# Con alguno de esos caracteres la misma contraseña acaba siendo otra en cada sitio (medido): Postgres se
+# inicializa con una y Certify se conecta con otra. Se rechazan, sin imprimir el valor.
+validate_secret_chars() {
+  local var="$1" valor="${!1:-}"
+  if [[ "${valor}" == *[\$\\\`\"\']* || "${valor}" =~ [[:space:][:cntrl:]] ]]; then
+    echo "ERROR: ${var} contiene un carácter no admitido: «\$», «\\», comillas (simple, doble o invertida), espacios o saltos de línea. Compose, Spring y la base de datos los leerían de forma distinta y la contraseña dejaría de ser la misma. Use letras, dígitos y . _ @ % + = - (por ejemplo: openssl rand -hex 32)." >&2
+    exit 1
+  fi
+}
+
 validate_env() {
   local missing=()
   for var in INSTITUTION_ID INSTITUTION_DISPLAY_NAME RESTAPI_BASE_URL OAUTH_CLIENT_ID OAUTH_CLIENT_SECRET \
@@ -349,6 +361,9 @@ validate_env() {
     echo "ERROR: Configure OAUTH_CLIENT_ID con el valor provisto por OGTIC (sigue el marcador CAMBIAR-ME del .env.example)." >&2
     exit 1
   fi
+  validate_secret_chars POSTGRES_PASSWORD
+  validate_secret_chars KEYSTORE_PASSWORD
+  validate_secret_chars OAUTH_CLIENT_SECRET
   # R4: el token de la API de datos NO tiene defecto. Antes apuntaba a Cuenta Única de staging; un
   # defecto equivocado se descubre en producción.
   if [[ -z "${RESTAPI_TOKEN_URL:-}" || "${RESTAPI_TOKEN_URL}" == "CAMBIAR-ME" ]]; then
