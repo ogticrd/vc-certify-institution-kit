@@ -323,7 +323,7 @@ describe("R7 · SQL idempotente (UPSERT por la clave única de credential_config
 });
 
 describe("R3 · plantilla VC 2.0", () => {
-  test("validFrom/validUntil, issuer y titular como variables Velocity, un ${atributo} por atributo, sin issuanceDate", () => {
+  test("validFrom/validUntil, issuer y titular como variables Velocity, un $!{_esc.java($atributo)} por atributo (K9), sin issuanceDate", () => {
     conEntorno({}, (e) => {
       const t = plantillaDesdeSql(e.leer("sql"));
       assert.deepEqual(Object.keys(t), ["@context", "issuer", "type", "validFrom", "validUntil", "credentialSubject"]);
@@ -331,7 +331,7 @@ describe("R3 · plantilla VC 2.0", () => {
       assert.equal(t.validFrom, "${validFrom}");
       assert.equal(t.validUntil, "${validUntil}");
       assert.deepEqual(t.credentialSubject, {
-        id: "${_holderId}", nombre: "${nombre}", apellido: "${apellido}", numeroLicencia: "${numeroLicencia}",
+        id: "${_holderId}", nombre: "$!{_esc.java($nombre)}", apellido: "$!{_esc.java($apellido)}", numeroLicencia: "$!{_esc.java($numeroLicencia)}",
       });
       assert.deepEqual(t.type, ["VerifiableCredential", "pruebaCredential"]);
     });

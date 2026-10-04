@@ -186,6 +186,20 @@ export function construirContexto(e) {
 // Plantilla Velocity (VC 2.0). El orden del @context es el de contextosPlantilla; `type` lleva
 // VerifiableCredential primero y los propios después (igual que el emisor propio; el orden de
 // `type` no afecta a la firma y la búsqueda de Certify usa la columna, ya ordenada).
+//
+// ATRIBUTOS (K9): `"$!{_esc.java($atributo)}"` y no `"${atributo}"`. Certify evalúa la plantilla con Velocity 1.7
+// (modo no estricto) y después hace `new JSONObject(texto)`:
+//  - sin escapar, un valor con «"», «\» o un salto de línea (apellido «De "La" Cruz») rompe el JSON: 500 al ciudadano;
+//  - sin `$!`, un campo ausente o nulo deja la referencia sin resolver y Velocity imprime el texto literal
+//    «${apellido}»: el kit FIRMABA la credencial con ese valor. Con `$!` sale vacío.
+// `_esc` es el EscapeTool de velocity-tools-generic 3.1 que Certify mete en el contexto
+// (VelocityTemplatingEngineImpl.format). Ese EscapeTool NO tiene `json()` —la evaluación adversarial proponía
+// `_esc.json`, que no existe en 3.1—; `java()` escapa «"», «\», saltos y todo lo no ASCII como \uXXXX, que son
+// también escapes JSON válidos (medido con Velocity 1.7 + tools 3.1 reales: los 63 489 caracteres del plano básico
+// y un par sustituto vuelven idénticos tras JSON.parse). Prueba: test/plantilla-velocity.test.mjs. Lo que Certify
+// genera él mismo (`_issuer`, `_holderId`, fechas) no lleva escape: son DID y fechas propios.
+// El emisor propio (inji-vc/stack/bin/sembrar-credenciales.sh) usa el patrón sin escape: paridad con lo que ya
+// corre, pero con el mismo defecto (a corregir allí aparte).
 export function construirPlantilla(e) {
   return {
     "@context": contextosPlantilla(e),
@@ -193,7 +207,7 @@ export function construirPlantilla(e) {
     type: ["VerifiableCredential", ...e.tiposPropios],
     validFrom: "${validFrom}",
     validUntil: "${validUntil}",
-    credentialSubject: { id: "${_holderId}", ...Object.fromEntries(e.atributos.map((a) => [a, "${" + a + "}"])) },
+    credentialSubject: { id: "${_holderId}", ...Object.fromEntries(e.atributos.map((a) => [a, "$!{_esc.java($" + a + ")}"])) },
   };
 }
 
