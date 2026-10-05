@@ -20,6 +20,11 @@
 //     vea también desde internet.
 //   - Tiempo de espera corto, tamaño máximo de respuesta, y como mucho tres
 //     redirecciones, cada una validada como la primera. Un POST nunca se redirige.
+//   - Dos opciones por petición, SOLO para endurecer (nunca relajan nada de lo
+//     de arriba): `sinRedirecciones` devuelve la respuesta 3xx tal cual en vez de
+//     seguirla, y `espera` baja el tiempo máximo de ESA petición (no puede subir
+//     el de la instancia). Las usa la comprobación 12, que pide la lista de estado
+//     como la app: sin redirecciones y con 5 s.
 import https from "node:https";
 import dns from "node:dns";
 import net from "node:net";
@@ -33,15 +38,38 @@ const UA = "soyyord-diagnostico/1.0 (OGTIC; diagnostico de emisores)";
 const PRIVADAS_V4 = [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16],
   ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 3]];
 const aNum = (ip) => ip.split(".").reduce((n, x) => (n << 8n) + BigInt(Number(x)), 0n);
+const privadaV4 = (ip) => { const n = aNum(ip); return PRIVADAS_V4.some(([red, bits]) => (n >> BigInt(32 - bits)) === (aNum(red) >> BigInt(32 - bits))); };
+
+// Una IPv6 (con o sin zona, con o sin cola IPv4 `a.b.c.d`) como ocho grupos de 16 bits, o null si no lo es.
+// Hace falta porque la MISMA dirección se escribe de muchas formas: `::ffff:127.0.0.1` y `::ffff:7f00:1` son
+// la IPv4 de bucle, y una barrera que solo conoce una forma deja pasar la otra (C14 de la evaluación
+// adversarial de la comprobación 12: `https://[::ffff:7f00:1]:<puerto>/` llegaba a un servidor en 127.0.0.1).
+function gruposV6(ip) {
+  let x = ip.toLowerCase().replace(/%.*$/, "");
+  if (!net.isIPv6(x)) return null;
+  const cola = x.match(/^(.*:)(\d+\.\d+\.\d+\.\d+)$/);
+  if (cola) { const n = aNum(cola[2]); x = `${cola[1]}${((n >> 16n) & 0xffffn).toString(16)}:${(n & 0xffffn).toString(16)}`; }
+  const [cabeza, resto] = x.split("::");
+  const ca = cabeza ? cabeza.split(":") : [], re = resto === undefined ? null : resto ? resto.split(":") : [];
+  const grupos = re === null ? ca : [...ca, ...Array(8 - ca.length - re.length).fill("0"), ...re];
+  return grupos.length === 8 ? grupos.map((g) => parseInt(g, 16)) : null;
+}
+
 export function esPrivada(ip) {
-  if (net.isIPv4(ip)) {
-    const n = aNum(ip);
-    return PRIVADAS_V4.some(([red, bits]) => (n >> BigInt(32 - bits)) === (aNum(red) >> BigInt(32 - bits)));
+  if (net.isIPv4(ip)) return privadaV4(ip);
+  const g = gruposV6(String(ip));
+  if (g) {
+    const ceros = (n) => g.slice(0, n).every((v) => v === 0);
+    if (ceros(5) && g[5] === 0xffff) return privadaV4(`${g[6] >> 8}.${g[6] & 255}.${g[7] >> 8}.${g[7] & 255}`); // IPv4 mapeada: vale lo que valga la IPv4
+    if (ceros(6)) return true;                                   // ::/96 (:: y ::1 incluidos): IPv4 «compatible», obsoleta
+    if (g[0] === 0x64 && g[1] === 0xff9b) return true;           // NAT64
+    return (g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xffc0) === 0xfec0 || (g[0] >> 8) === 0xff;
   }
-  const x = ip.toLowerCase();
+  // No es una IP que sepamos leer: las reglas de siempre, sobre el texto.
+  const x = String(ip).toLowerCase();
   const mapeada = x.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapeada) return esPrivada(mapeada[1]);
-  return x === "::" || x === "::1" || /^f[cd]/.test(x) || /^fe[89ab]/.test(x) || /^ff/.test(x) || x.startsWith("64:ff9b:");
+  if (mapeada) return net.isIPv4(mapeada[1]) ? privadaV4(mapeada[1]) : false;
+  return x === "::" || x === "::1" || /^f[cd]/.test(x) || /^fe[89abcdef]/.test(x) || /^ff/.test(x) || x.startsWith("64:ff9b:");
 }
 
 export class ErrorRed extends Error {
@@ -62,11 +90,11 @@ export function crearRed({ espera = 8000, hostsInternos = [], permitirPrivadas =
     });
   };
 
-  function una(url, { metodo, cuerpo, cabeceras, limite }) {
+  function una(url, { metodo, cuerpo, cabeceras, limite, espera: tope = espera }) {
     return new Promise((resolver, rechazar) => {
       const u = new URL(url);
       const pet = https.request(u, {
-        method: metodo, lookup, agent: false, timeout: espera,
+        method: metodo, lookup, agent: false, timeout: tope,
         headers: { "User-Agent": UA, Accept: "application/ld+json, application/json;q=0.9, */*;q=0.5",
                    ...(cuerpo ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(cuerpo) } : {}),
                    ...cabeceras },
@@ -84,7 +112,7 @@ export function crearRed({ espera = 8000, hostsInternos = [], permitirPrivadas =
       });
       // Tope total, no solo de inactividad: un servidor que gotea un byte por
       // segundo no puede tener la evaluación colgada.
-      const reloj = setTimeout(() => { const e = new Error("sin respuesta"); e.code = "ESPERA"; pet.destroy(e); }, espera);
+      const reloj = setTimeout(() => { const e = new Error("sin respuesta"); e.code = "ESPERA"; pet.destroy(e); }, tope);
       pet.on("timeout", () => { const e = new Error("sin respuesta"); e.code = "ESPERA"; pet.destroy(e); });
       pet.on("error", (e) => { clearTimeout(reloj); rechazar(e); });
       pet.on("close", () => clearTimeout(reloj));
@@ -95,7 +123,9 @@ export function crearRed({ espera = 8000, hostsInternos = [], permitirPrivadas =
 
   // Devuelve {estado, cabeceras, cuerpo(Buffer), url, truncado} o lanza ErrorRed
   // con un código que dice QUÉ falló: dns, espera, tls, conexion, privada...
-  async function traer(url, { metodo = "GET", cuerpo = null, cabeceras = {}, limite = 1 << 20 } = {}) {
+  async function traer(url, { metodo = "GET", cuerpo = null, cabeceras = {}, limite = 1 << 20, sinRedirecciones = false, espera: esperaPeticion } = {}) {
+    // Solo puede BAJAR el tiempo de la instancia: un NaN, un 0 o un valor mayor se ignoran.
+    const tope = Number.isFinite(esperaPeticion) && esperaPeticion > 0 ? Math.min(espera, esperaPeticion) : espera;
     let actual = url;
     for (let salto = 0; salto <= 3; salto++) {
       let u;
@@ -110,9 +140,9 @@ export function crearRed({ espera = 8000, hostsInternos = [], permitirPrivadas =
         throw new ErrorRed("privada", `${u.hostname} es una dirección no pública: no se consulta`, u.hostname);
       }
       let r;
-      try { r = await una(actual, { metodo, cuerpo, cabeceras, limite }); }
+      try { r = await una(actual, { metodo, cuerpo, cabeceras, limite, espera: tope }); }
       catch (e) { throw await clasificar(e, u.hostname); }
-      if (metodo === "GET" && [301, 302, 303, 307, 308].includes(r.estado) && r.cabeceras.location) {
+      if (!sinRedirecciones && metodo === "GET" && [301, 302, 303, 307, 308].includes(r.estado) && r.cabeceras.location) {
         actual = new URL(r.cabeceras.location, actual).href;
         continue;
       }

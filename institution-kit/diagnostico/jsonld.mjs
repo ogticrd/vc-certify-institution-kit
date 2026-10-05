@@ -355,11 +355,25 @@ class Emisor {
   clon() { const c = new Emisor(this.prefijo); c.n = this.n; c.mapa = new Map(this.mapa); return c; }
 }
 
+// Añade `v` a `arr` si no hay ya un valor igual (JSON-LD toRdf trata los valores de una propiedad como un
+// conjunto). Antes comparaba con TODOS los anteriores, con JSON.stringify: cuadrático (20 000 hijos de un
+// mismo nodo, 6 s; 40 000, 25 s: C13 de la evaluación adversarial de la comprobación 12). Ahora una vez por
+// valor, con un conjunto de las formas ya vistas que se construye la primera vez que se añade a esa lista.
+const vistosPorLista = new WeakMap();
+function anadirSinRepetir(arr, v) {
+  let vistos = vistosPorLista.get(arr);
+  if (!vistos) { vistos = new Set(arr.map((x) => JSON.stringify(x))); vistosPorLista.set(arr, vistos); }
+  const clave = JSON.stringify(v);
+  if (vistos.has(clave)) return;
+  vistos.add(clave);
+  arr.push(v);
+}
+
 function mapaNodos(elem, mapa, emisor, grafo = "@default", sujeto = null, prop = null, lista = null) {
   if (Array.isArray(elem)) { for (const x of elem) mapaNodos(x, mapa, emisor, grafo, sujeto, prop, lista); return; }
   const g = (mapa[grafo] ??= {});
   const nodoSujeto = sujeto ? g[sujeto] : null;
-  const anadir = (arr, v) => { if (!arr.some((x) => JSON.stringify(x) === JSON.stringify(v))) arr.push(v); };
+  const anadir = anadirSinRepetir;
   if ("@value" in elem) {
     if (lista) lista["@list"].push(elem); else anadir(nodoSujeto[prop], elem);
     return;
@@ -472,7 +486,13 @@ function termino(t) {
 export const nquad = (q) => `${termino(q.s)} ${termino(q.p)} ${termino(q.o)} ${q.g ? termino(q.g) + " " : ""}.\n`;
 const sha256 = (s) => createHash("sha256").update(s, "utf8").digest("hex");
 
-export function canonizar(cuads) {
+// `limite` (opcional) es un instante (ms desde la época) pasado el cual se deja de canonicalizar con un
+// ErrorJsonLd «plazo». URDNA2015 es factorial con nodos en blanco indistinguibles entre sí (dos padres
+// idénticos con diez hijos idénticos, 400 bytes, tardan 134 s) y esta función no cede el hilo: sin plazo,
+// un documento ajeno cuelga el proceso entero. Las comprobaciones que no lo piden se comportan como siempre.
+export function canonizar(cuads, { limite } = {}) {
+  let pasos = 0;
+  const vigilar = () => { if (limite !== undefined && (++pasos & 127) === 0 && Date.now() > limite) fallar("plazo", "se acabó el tiempo canonicalizando el grafo"); };
   const porBlanco = new Map();
   for (const q of cuads) for (const k of ["s", "o", "g"]) {
     const t = q[k];
@@ -501,6 +521,7 @@ export function canonizar(cuads) {
     for (let i = 0; i < l.length; i++) for (const r of permutaciones([...l.slice(0, i), ...l.slice(i + 1)])) yield [l[i], ...r];
   }
   const hashN = (id, emisor) => {
+    vigilar();
     const relacionados = new Map();
     for (const q of porBlanco.get(id)) for (const [k, pos] of [["s", "s"], ["o", "o"], ["g", "g"]]) {
       const t = q[k];
@@ -515,6 +536,7 @@ export function canonizar(cuads) {
       datos += h;
       let elegido = "", emisorElegido = null;
       for (const perm of permutaciones(relacionados.get(h))) {
+        vigilar();
         let copia = emisor.clon(), camino = "", recursion = [], descartar = false;
         for (const rel of perm) {
           if (canonico.tiene(rel)) camino += canonico.id(rel);
@@ -550,6 +572,7 @@ export function canonizar(cuads) {
     if (ids.length === 1) continue;
     const resultados = [];
     for (const id of ids) {
+      vigilar();
       if (canonico.tiene(id)) continue;
       const temp = new Emisor("_:b");
       temp.id(id);
@@ -566,5 +589,5 @@ export async function canonizarDocumento(doc, op) {
   const descartados = [];
   const exp = await expandir(doc, { ...op, descartado: (t, p) => descartados.push({ termino: t, en: p }) });
   const cuads = aRdf(exp);
-  return { nquads: canonizar(cuads), cuads, expandido: exp, descartados };
+  return { nquads: canonizar(cuads, { limite: op?.limite }), cuads, expandido: exp, descartados };
 }
